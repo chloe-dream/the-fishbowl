@@ -109,6 +109,20 @@ public class DatabaseFactory
                 );", transaction: transaction);
 
             connection.Execute(@"
+                CREATE TABLE IF NOT EXISTS todos (
+                    id            TEXT PRIMARY KEY,
+                    title         TEXT NOT NULL,
+                    description   TEXT,
+                    due_at        TEXT,
+                    reminder_at   TEXT,
+                    source        TEXT,
+                    created_by    TEXT NOT NULL,
+                    created_at    TEXT NOT NULL,
+                    updated_at    TEXT NOT NULL,
+                    completed_at  TEXT
+                );", transaction: transaction);
+
+            connection.Execute(@"
                 -- FTS5 virtual table for full-text search
                 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
                     title,

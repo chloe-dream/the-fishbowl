@@ -1,5 +1,8 @@
 using Fishbowl.Core;
 using Fishbowl.Data;
+using Fishbowl.Core.Repositories;
+using Fishbowl.Data.Repositories;
+using Fishbowl.Api.Endpoints;
 using Microsoft.Extensions.Caching.Memory;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -14,9 +17,17 @@ builder.Services.AddSingleton<IResourceProvider, ResourceProvider>(sp =>
 
 builder.Services.AddSingleton<DatabaseFactory>(new DatabaseFactory("fishbowl-data/users"));
 
+// Register Repositories
+builder.Services.AddScoped<INoteRepository, NoteRepository>();
+builder.Services.AddScoped<ITodoRepository, TodoRepository>();
+
 var app = builder.Build();
 
 app.MapGet("/", () => "The Fishbowl is running.");
+
+// Register API Endpoints
+app.MapNotesApi();
+app.MapTodoApi();
 
 // Test endpoint for ResourceProvider
 app.MapGet("/test/resource/{*path}", async (string path, IResourceProvider resources) =>
@@ -50,3 +61,5 @@ app.MapGet("/test/db/{userId}", (string userId, DatabaseFactory dbFactory) =>
 });
 
 app.Run();
+
+public partial class Program { }

@@ -1,0 +1,65 @@
+using Xunit;
+using Fishbowl.Data;
+using Fishbowl.Core.Models;
+using Fishbowl.Data.Repositories;
+using Microsoft.Data.Sqlite;
+using System.IO;
+using System.Threading.Tasks;
+
+namespace Fishbowl.Tests.Repositories;
+
+public class TodoRepositoryTests : IDisposable
+{
+    private readonly string _tempDbDir;
+    private readonly DatabaseFactory _dbFactory;
+    private readonly TodoRepository _repo;
+    private const string TestUserId = "todo_repo_test";
+
+    public TodoRepositoryTests()
+    {
+        _tempDbDir = Path.Combine(Path.GetTempPath(), "fishbowl_todo_repo_tests_" + Path.GetRandomFileName());
+        Directory.CreateDirectory(_tempDbDir);
+        _dbFactory = new DatabaseFactory(_tempDbDir);
+        _repo = new TodoRepository(_dbFactory);
+    }
+
+    [Fact]
+    public async Task CreateAndGet_Test()
+    {
+        // Arrange
+        var todo = new TodoItem { Title = "Task 1", Description = "Desc" };
+
+        // Act
+        var id = await _repo.CreateAsync(TestUserId, todo);
+        var retrieved = await _repo.GetByIdAsync(TestUserId, id);
+
+        // Assert
+        Assert.NotNull(retrieved);
+        Assert.Equal("Task 1", retrieved.Title);
+    }
+
+    [Fact]
+    public async Task GetAll_Filtering_Test()
+    {
+        // Arrange
+        await _repo.CreateAsync(TestUserId, new TodoItem { Title = "Active Task" });
+        await _repo.CreateAsync(TestUserId, new TodoItem { Title = "Completed Task", CompletedAt = DateTime.UtcNow });
+
+        // Act
+        var activeOnly = await _repo.GetAllAsync(TestUserId, includeCompleted: false);
+        var all = await _repo.GetAllAsync(TestUserId, includeCompleted: true);
+
+        // Assert
+        Assert.Single(activeOnly);
+        Assert.Equal(2, all.Count());
+    }
+
+    public void Dispose()
+    {
+        SqliteConnection.ClearAllPools();
+        if (Directory.Exists(_tempDbDir))
+        {
+            Directory.Delete(_tempDbDir, true);
+        }
+    }
+}

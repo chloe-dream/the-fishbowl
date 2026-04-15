@@ -49,6 +49,7 @@ public class DatabaseFactoryTests : IDisposable
         Assert.Contains("events", tables);
         Assert.Contains("sync_sources", tables);
         Assert.Contains("reminders", tables);
+        Assert.Contains("todos", tables);
     }
 
     [Fact]

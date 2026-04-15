@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Fishbowl.Data\Fishbowl.Data.csproj" />
     <ProjectReference Include="..\Fishbowl.Search\Fishbowl.Search.csproj" />
+    <ProjectReference Include="..\Fishbowl.Core\Fishbowl.Core.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -10,5 +11,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
 
 </Project>
