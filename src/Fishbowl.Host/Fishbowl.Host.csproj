@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Fishbowl.Api\Fishbowl.Api.csproj" />
+    <ProjectReference Include="..\Fishbowl.Bot.Discord\Fishbowl.Bot.Discord.csproj" />
+    <ProjectReference Include="..\Fishbowl.Sync\Fishbowl.Sync.csproj" />
+    <ProjectReference Include="..\Fishbowl.Scheduler\Fishbowl.Scheduler.csproj" />
+    <ProjectReference Include="..\Fishbowl.Scripting\Fishbowl.Scripting.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+</Project>
