@@ -1,0 +1,6 @@
+<Project>
+  <Target Name="RunTestsOnBuild" AfterTargets="Build" Condition="'$(ContinuousIntegrationBuild)' != 'true' AND $(MSBuildProjectName.EndsWith('.Tests'))">
+    <Message Importance="High" Text="[Fishbowl] Auto-running tests for $(MSBuildProjectName)..." />
+    <Exec Command="dotnet test --no-build --verbosity quiet" />
+  </Target>
+</Project>
