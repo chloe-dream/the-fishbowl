@@ -698,7 +698,7 @@ No manifest file. No whitelist. No config. Drop a file in the right folder — i
 
 ### DLL Plugins
 
-Any `.dll` placed in `fishbowl-mods/plugins/` is loaded at startup via `Assembly.LoadFrom()`. It must implement `IFishbowlPlugin`. No registration file needed.
+Any `.dll` placed in `fishbowl-mods/plugins/` is loaded at startup via an isolated `AssemblyLoadContext` (ALC) to prevent dependency version conflicts (DLL Hell) with the host application. It must implement `IFishbowlPlugin`. No registration file needed.
 
 ```
 fishbowl-mods/
@@ -751,20 +751,31 @@ Priority order (first match wins):
 ```csharp
 public class ResourceProvider
 {
+    // Resources are cached in memory. No hot-modding.
+    // Mods dropped into the folder while the app is running are ignored until restart.
+    private readonly MemoryCache _cache;
+
     public async Task<Resource> GetAsync(string path)
     {
+        if (_cache.TryGetValue(path, out var cachedResource))
+            return cachedResource;
+
         // 1. Disk
         var diskPath = Path.Combine("fishbowl-mods", path);
         if (File.Exists(diskPath))
-            return Resource.FromDisk(diskPath);
+        {
+            return CacheAndReturn(path, Resource.FromDisk(diskPath));
+        }
 
         // 2. Database (collection renderers)
         var dbResource = await _db.GetResourceAsync(path);
         if (dbResource != null)
-            return Resource.FromDb(dbResource);
+        {
+            return CacheAndReturn(path, Resource.FromDb(dbResource));
+        }
 
         // 3. Embedded fallback
-        return Resource.FromEmbedded(path);
+        return CacheAndReturn(path, Resource.FromEmbedded(path));
     }
 }
 ```
