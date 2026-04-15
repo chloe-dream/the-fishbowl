@@ -17,7 +17,7 @@ public enum ResourceSource
 /// <summary>
 /// Represents a system or mod resource.
 /// </summary>
-public record Resource(Stream Content, string Path, ResourceSource Source, string? Hash = null);
+public record Resource(byte[] Data, string Path, ResourceSource Source, string? Hash = null);
 
 /// <summary>
 /// Provides access to system and mod resources with a priority system:

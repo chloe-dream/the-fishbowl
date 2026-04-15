@@ -1,11 +1,16 @@
 using Fishbowl.Core;
 using Fishbowl.Data;
+using Microsoft.Extensions.Caching.Memory;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Register Core Services
+builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IResourceProvider, ResourceProvider>(sp => 
-    new ResourceProvider(modsPath: "fishbowl-mods", embeddedAssembly: typeof(ResourceProvider).Assembly));
+    new ResourceProvider(
+        cache: sp.GetRequiredService<IMemoryCache>(),
+        modsPath: "fishbowl-mods", 
+        embeddedAssembly: typeof(ResourceProvider).Assembly));
 
 builder.Services.AddSingleton<DatabaseFactory>(new DatabaseFactory("fishbowl-data/users"));
 
@@ -19,8 +24,8 @@ app.MapGet("/test/resource/{*path}", async (string path, IResourceProvider resou
     var resource = await resources.GetAsync(path);
     if (resource == null) return Results.NotFound($"Resource '{path}' not found.");
     
-    using var reader = new StreamReader(resource.Content);
-    var content = await reader.ReadToEndAsync();
+    // We can directly decode byte[] to string for simple text resources (like templates/scripts)
+    var content = System.Text.Encoding.UTF8.GetString(resource.Data);
     
     return Results.Ok(new 
     { 

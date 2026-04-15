@@ -1,8 +1,6 @@
-using System;
-using System.IO;
 using System.Reflection;
-using System.Threading.Tasks;
 using Fishbowl.Core;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace Fishbowl.Data;
 
@@ -10,45 +8,68 @@ public class ResourceProvider : IResourceProvider
 {
     private readonly string _modsPath;
     private readonly Assembly _embeddedAssembly;
+    private readonly IMemoryCache _cache;
 
-    public ResourceProvider(string modsPath = "fishbowl-mods", Assembly? embeddedAssembly = null)
+    public ResourceProvider(IMemoryCache cache, string modsPath = "fishbowl-mods", Assembly? embeddedAssembly = null)
     {
+        _cache = cache;
         _modsPath = modsPath;
         _embeddedAssembly = embeddedAssembly ?? Assembly.GetExecutingAssembly();
     }
 
     public async Task<Resource?> GetAsync(string path)
     {
+        if (_cache.TryGetValue(path, out Resource? cached))
+        {
+            return cached;
+        }
+
+        Resource? resource = null;
+
         // 1. Check Disk (Mods)
         var diskPath = Path.Combine(_modsPath, path);
         if (File.Exists(diskPath))
         {
-            var stream = File.OpenRead(diskPath);
-            return new Resource(stream, path, ResourceSource.Disk);
+            var data = await File.ReadAllBytesAsync(diskPath);
+            resource = new Resource(data, path, ResourceSource.Disk);
         }
 
         // 2. Check Database (TODO: Implement when DB service is ready)
-        // var dbResource = await _db.GetResourceAsync(path);
-        // if (dbResource != null) return dbResource;
-
-        // 3. Check Embedded
-        var embeddedPath = path.Replace('/', '.').Replace('\\', '.');
-        // Assembly resources are usually prefixed with the default namespace
-        var resourceName = $"{_embeddedAssembly.GetName().Name}.Resources.{embeddedPath}";
-        var streamEmbedded = _embeddedAssembly.GetManifestResourceStream(resourceName);
-        
-        if (streamEmbedded != null)
+        if (resource == null)
         {
-            return new Resource(streamEmbedded, path, ResourceSource.Embedded);
+            // var dbResource = await _db.GetResourceAsync(path);
+            // if (dbResource != null) resource = dbResource;
         }
 
-        return null;
+        // 3. Check Embedded
+        if (resource == null)
+        {
+            var embeddedPath = path.Replace('/', '.').Replace('\\', '.');
+            var resourceName = $"{_embeddedAssembly.GetName().Name}.Resources.{embeddedPath}";
+            using var stream = _embeddedAssembly.GetManifestResourceStream(resourceName);
+            
+            if (stream != null)
+            {
+                using var ms = new MemoryStream();
+                await stream.CopyToAsync(ms);
+                resource = new Resource(ms.ToArray(), path, ResourceSource.Embedded);
+            }
+        }
+
+        if (resource != null)
+        {
+            _cache.Set(path, resource);
+        }
+
+        return resource;
     }
 
-    public Task<bool> ExistsAsync(string path)
+    public async Task<bool> ExistsAsync(string path)
     {
+        if (_cache.TryGetValue(path, out _)) return true;
+
         var diskPath = Path.Combine(_modsPath, path);
-        if (File.Exists(diskPath)) return Task.FromResult(true);
+        if (File.Exists(diskPath)) return true;
 
         var embeddedPath = path.Replace('/', '.').Replace('\\', '.');
         var resourceName = $"{_embeddedAssembly.GetName().Name}.Resources.{embeddedPath}";
@@ -57,9 +78,9 @@ public class ResourceProvider : IResourceProvider
         foreach (var name in manifestNames)
         {
             if (name.Equals(resourceName, StringComparison.OrdinalIgnoreCase))
-                return Task.FromResult(true);
+                return true;
         }
 
-        return Task.FromResult(false);
+        return false;
     }
 }
