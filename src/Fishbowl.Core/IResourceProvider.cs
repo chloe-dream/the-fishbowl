@@ -28,10 +28,10 @@ public interface IResourceProvider
     /// <summary>
     /// Retrieves a resource by its path.
     /// </summary>
-    Task<Resource?> GetAsync(string path);
+    Task<Resource?> GetAsync(string path, CancellationToken ct = default);
 
     /// <summary>
     /// Checks if a resource exists.
     /// </summary>
-    Task<bool> ExistsAsync(string path);
+    Task<bool> ExistsAsync(string path, CancellationToken ct = default);
 }

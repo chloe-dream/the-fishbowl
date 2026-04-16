@@ -35,14 +35,14 @@ public class NoteRepositoryTests : IDisposable
         };
 
         // Act
-        var id = await _repo.CreateAsync(TestUserId, note);
+        var id = await _repo.CreateAsync(TestUserId, note, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.NotNull(id);
         Assert.Equal(id, note.Id);
         Assert.Equal(TestUserId, note.CreatedBy);
         
-        var retrieved = await _repo.GetByIdAsync(TestUserId, id);
+        var retrieved = await _repo.GetByIdAsync(TestUserId, id, TestContext.Current.CancellationToken);
         Assert.NotNull(retrieved);
         Assert.Equal("Test Note", retrieved.Title);
         Assert.Equal(2, retrieved.Tags.Count);
@@ -54,16 +54,16 @@ public class NoteRepositoryTests : IDisposable
     {
         // Arrange
         var note = new Note { Title = "Original", Content = "Old" };
-        var id = await _repo.CreateAsync(TestUserId, note);
+        var id = await _repo.CreateAsync(TestUserId, note, TestContext.Current.CancellationToken);
 
         // Act
         note.Title = "Updated";
         note.Tags.Add("new-tag");
-        var success = await _repo.UpdateAsync(TestUserId, note);
+        var success = await _repo.UpdateAsync(TestUserId, note, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.True(success);
-        var retrieved = await _repo.GetByIdAsync(TestUserId, id);
+        var retrieved = await _repo.GetByIdAsync(TestUserId, id, TestContext.Current.CancellationToken);
         Assert.Equal("Updated", retrieved!.Title);
         Assert.Contains("new-tag", retrieved.Tags);
     }
@@ -73,14 +73,14 @@ public class NoteRepositoryTests : IDisposable
     {
         // Arrange
         var note = new Note { Title = "To Delete" };
-        var id = await _repo.CreateAsync(TestUserId, note);
+        var id = await _repo.CreateAsync(TestUserId, note, TestContext.Current.CancellationToken);
 
         // Act
-        var success = await _repo.DeleteAsync(TestUserId, id);
+        var success = await _repo.DeleteAsync(TestUserId, id, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.True(success);
-        var retrieved = await _repo.GetByIdAsync(TestUserId, id);
+        var retrieved = await _repo.GetByIdAsync(TestUserId, id, TestContext.Current.CancellationToken);
         Assert.Null(retrieved);
     }
 
@@ -88,12 +88,12 @@ public class NoteRepositoryTests : IDisposable
     public async Task GetAll_ReturnsAllNotesForUser_Test()
     {
         // Arrange
-        await _repo.CreateAsync(TestUserId, new Note { Title = "Note 1" });
-        await _repo.CreateAsync(TestUserId, new Note { Title = "Note 2" });
-        await _repo.CreateAsync("other_user", new Note { Title = "Other Note" });
+        await _repo.CreateAsync(TestUserId, new Note { Title = "Note 1" }, TestContext.Current.CancellationToken);
+        await _repo.CreateAsync(TestUserId, new Note { Title = "Note 2" }, TestContext.Current.CancellationToken);
+        await _repo.CreateAsync("other_user", new Note { Title = "Other Note" }, TestContext.Current.CancellationToken);
 
         // Act
-        var notes = await _repo.GetAllAsync(TestUserId);
+        var notes = await _repo.GetAllAsync(TestUserId, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(2, notes.Count());
@@ -104,7 +104,7 @@ public class NoteRepositoryTests : IDisposable
         SqliteConnection.ClearAllPools();
         if (Directory.Exists(_tempDbDir))
         {
-            Directory.Delete(_tempDbDir, true);
+            try { Directory.Delete(_tempDbDir, true); } catch { }
         }
     }
 }

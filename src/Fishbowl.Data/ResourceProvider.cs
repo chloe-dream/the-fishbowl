@@ -17,7 +17,7 @@ public class ResourceProvider : IResourceProvider
         _embeddedAssembly = embeddedAssembly ?? Assembly.GetExecutingAssembly();
     }
 
-    public async Task<Resource?> GetAsync(string path)
+    public async Task<Resource?> GetAsync(string path, CancellationToken ct = default)
     {
         if (_cache.TryGetValue(path, out Resource? cached))
         {
@@ -30,7 +30,7 @@ public class ResourceProvider : IResourceProvider
         var diskPath = Path.Combine(_modsPath, path);
         if (File.Exists(diskPath))
         {
-            var data = await File.ReadAllBytesAsync(diskPath);
+            var data = await File.ReadAllBytesAsync(diskPath, ct);
             resource = new Resource(data, path, ResourceSource.Disk);
         }
 
@@ -44,15 +44,35 @@ public class ResourceProvider : IResourceProvider
         // 3. Check Embedded
         if (resource == null)
         {
-            var embeddedPath = path.Replace('/', '.').Replace('\\', '.');
-            var resourceName = $"{_embeddedAssembly.GetName().Name}.Resources.{embeddedPath}";
-            using var stream = _embeddedAssembly.GetManifestResourceStream(resourceName);
+            var normalizedPath = path.Replace('\\', '/');
+            
+            // Try direct path matches
+            // 1. As-is
+            var stream = _embeddedAssembly.GetManifestResourceStream(normalizedPath);
+            
+            // 2. With backslashes (Common on Windows MSBuild with LogicalName / RecursiveDir)
+            if (stream == null)
+            {
+                var windowsPath = normalizedPath.Replace('/', '\\');
+                stream = _embeddedAssembly.GetManifestResourceStream(windowsPath);
+            }
+            
+            // 3. Legacy dot-notation fallback
+            if (stream == null)
+            {
+                var dotPath = normalizedPath.Replace('/', '.');
+                var legacyName = $"{_embeddedAssembly.GetName().Name}.Resources.{dotPath}";
+                stream = _embeddedAssembly.GetManifestResourceStream(legacyName);
+            }
             
             if (stream != null)
             {
-                using var ms = new MemoryStream();
-                await stream.CopyToAsync(ms);
-                resource = new Resource(ms.ToArray(), path, ResourceSource.Embedded);
+                using (stream)
+                using (var ms = new MemoryStream())
+                {
+                    await stream.CopyToAsync(ms, ct);
+                    resource = new Resource(ms.ToArray(), path, ResourceSource.Embedded);
+                }
             }
         }
 
@@ -64,7 +84,7 @@ public class ResourceProvider : IResourceProvider
         return resource;
     }
 
-    public async Task<bool> ExistsAsync(string path)
+    public async Task<bool> ExistsAsync(string path, CancellationToken ct = default)
     {
         if (_cache.TryGetValue(path, out _)) return true;
 

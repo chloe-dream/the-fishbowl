@@ -1,11 +1,42 @@
 using System.Net.Http.Json;
+using System.Security.Claims;
+using System.Text.Encodings.Web;
 using Fishbowl.Core.Models;
 using Fishbowl.Data;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Fishbowl.Host.Tests;
+
+// A custom authentication handler that reads a header and turns it into a Claim
+public class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
+{
+    public const string AuthenticationScheme = "TestScheme";
+    public const string UserIdHeader = "X-Test-User-Id";
+
+    public TestAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, 
+        ILoggerFactory logger, UrlEncoder encoder) : base(options, logger, encoder) { }
+
+    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+    {
+        if (!Request.Headers.TryGetValue(UserIdHeader, out var userId))
+        {
+            return Task.FromResult(AuthenticateResult.Fail("No User ID provided in test header"));
+        }
+
+        var claims = new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) };
+        var identity = new ClaimsIdentity(claims, AuthenticationScheme);
+        var principal = new ClaimsPrincipal(identity);
+        var ticket = new AuthenticationTicket(principal, AuthenticationScheme);
+
+        return Task.FromResult(AuthenticateResult.Success(ticket));
+    }
+}
 
 public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
@@ -22,14 +53,23 @@ public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
 
         _factory = factory.WithWebHostBuilder(builder =>
         {
+            builder.UseEnvironment("Testing");
             builder.ConfigureServices(services =>
             {
                 // Remove the production DatabaseFactory
-                var descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(DatabaseFactory));
-                if (descriptor != null) services.Remove(descriptor);
-
-                // Add a test-specific one
+                var dbDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(DatabaseFactory));
+                if (dbDescriptor != null) services.Remove(dbDescriptor);
                 services.AddSingleton<DatabaseFactory>(new DatabaseFactory(_testDataDir));
+
+                // Override Authentication to use our Test Scheme as the default
+                services.AddAuthentication(options =>
+                {
+                    options.DefaultAuthenticateScheme = TestAuthHandler.AuthenticationScheme;
+                    options.DefaultChallengeScheme = TestAuthHandler.AuthenticationScheme;
+                    options.DefaultScheme = TestAuthHandler.AuthenticationScheme;
+                })
+                .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(
+                    TestAuthHandler.AuthenticationScheme, options => { });
             });
         });
     }
@@ -45,29 +85,29 @@ public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
 
         // Act 1: Post as User A
         var requestA = new HttpRequestMessage(HttpMethod.Post, "/api/notes");
-        requestA.Headers.Add("X-Fishbowl-User-Id", UserA);
+        requestA.Headers.Add(TestAuthHandler.UserIdHeader, UserA);
         requestA.Content = JsonContent.Create(noteA);
-        var responseA = await client.SendAsync(requestA);
+        var responseA = await client.SendAsync(requestA, TestContext.Current.CancellationToken);
         Assert.True(responseA.IsSuccessStatusCode);
 
         // Act 2: Post as User B
         var requestB = new HttpRequestMessage(HttpMethod.Post, "/api/notes");
-        requestB.Headers.Add("X-Fishbowl-User-Id", UserB);
+        requestB.Headers.Add(TestAuthHandler.UserIdHeader, UserB);
         requestB.Content = JsonContent.Create(noteB);
-        var responseB = await client.SendAsync(requestB);
+        var responseB = await client.SendAsync(requestB, TestContext.Current.CancellationToken);
         Assert.True(responseB.IsSuccessStatusCode);
 
         // Act 3: Get notes for User A
         var getRequestA = new HttpRequestMessage(HttpMethod.Get, "/api/notes");
-        getRequestA.Headers.Add("X-Fishbowl-User-Id", UserA);
-        var getResponseA = await client.SendAsync(getRequestA);
-        var notesA = await getResponseA.Content.ReadFromJsonAsync<IEnumerable<Note>>();
+        getRequestA.Headers.Add(TestAuthHandler.UserIdHeader, UserA);
+        var getResponseA = await client.SendAsync(getRequestA, TestContext.Current.CancellationToken);
+        var notesA = await getResponseA.Content.ReadFromJsonAsync<IEnumerable<Note>>(TestContext.Current.CancellationToken);
 
         // Act 4: Get notes for User B
         var getRequestB = new HttpRequestMessage(HttpMethod.Get, "/api/notes");
-        getRequestB.Headers.Add("X-Fishbowl-User-Id", UserB);
-        var getResponseB = await client.SendAsync(getRequestB);
-        var notesB = await getResponseB.Content.ReadFromJsonAsync<IEnumerable<Note>>();
+        getRequestB.Headers.Add(TestAuthHandler.UserIdHeader, UserB);
+        var getResponseB = await client.SendAsync(getRequestB, TestContext.Current.CancellationToken);
+        var notesB = await getResponseB.Content.ReadFromJsonAsync<IEnumerable<Note>>(TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Single(notesA!);
@@ -78,16 +118,20 @@ public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
     }
 
     [Fact]
-    public async Task Get_ReturnsBadRequest_IfHeaderMissing_Test()
+    public async Task Get_ReturnsUnauthorized_IfAuthenticatedUserMissing_Test()
     {
         // Arrange
         var client = _factory.CreateClient();
 
         // Act
-        var response = await client.GetAsync("/api/notes");
+        // Without the X-Test-User-Id header, TestAuthHandler will fail authentication
+        var response = await client.GetAsync("/api/notes", TestContext.Current.CancellationToken);
 
         // Assert
-        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        // In Minimal APIs with RequireAuthorization, it returns 401 Unauthorized if using a direct API client
+        // or redirects to /login if it thinks it's a browser. 
+        // Our TestAuthHandler returns Fail, which results in 401.
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     public void Dispose()

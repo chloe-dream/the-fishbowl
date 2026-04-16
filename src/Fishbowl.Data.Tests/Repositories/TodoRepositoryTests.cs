@@ -30,8 +30,8 @@ public class TodoRepositoryTests : IDisposable
         var todo = new TodoItem { Title = "Task 1", Description = "Desc" };
 
         // Act
-        var id = await _repo.CreateAsync(TestUserId, todo);
-        var retrieved = await _repo.GetByIdAsync(TestUserId, id);
+        var id = await _repo.CreateAsync(TestUserId, todo, TestContext.Current.CancellationToken);
+        var retrieved = await _repo.GetByIdAsync(TestUserId, id, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.NotNull(retrieved);
@@ -42,12 +42,12 @@ public class TodoRepositoryTests : IDisposable
     public async Task GetAll_Filtering_Test()
     {
         // Arrange
-        await _repo.CreateAsync(TestUserId, new TodoItem { Title = "Active Task" });
-        await _repo.CreateAsync(TestUserId, new TodoItem { Title = "Completed Task", CompletedAt = DateTime.UtcNow });
+        await _repo.CreateAsync(TestUserId, new TodoItem { Title = "Active Task" }, TestContext.Current.CancellationToken);
+        await _repo.CreateAsync(TestUserId, new TodoItem { Title = "Completed Task", CompletedAt = DateTime.UtcNow }, TestContext.Current.CancellationToken);
 
         // Act
-        var activeOnly = await _repo.GetAllAsync(TestUserId, includeCompleted: false);
-        var all = await _repo.GetAllAsync(TestUserId, includeCompleted: true);
+        var activeOnly = await _repo.GetAllAsync(TestUserId, includeCompleted: false, TestContext.Current.CancellationToken);
+        var all = await _repo.GetAllAsync(TestUserId, includeCompleted: true, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Single(activeOnly);
@@ -59,7 +59,7 @@ public class TodoRepositoryTests : IDisposable
         SqliteConnection.ClearAllPools();
         if (Directory.Exists(_tempDbDir))
         {
-            Directory.Delete(_tempDbDir, true);
+            try { Directory.Delete(_tempDbDir, true); } catch { }
         }
     }
 }

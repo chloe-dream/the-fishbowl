@@ -14,18 +14,18 @@ public class TodoRepository : ITodoRepository
         _dbFactory = dbFactory;
     }
 
-    public async Task<TodoItem?> GetByIdAsync(string userId, string id)
+    public async Task<TodoItem?> GetByIdAsync(string userId, string id, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateConnection(userId);
         var row = await db.QuerySingleOrDefaultAsync<dynamic>(
-            "SELECT * FROM todos WHERE id = @id", new { id });
+            new CommandDefinition("SELECT * FROM todos WHERE id = @id", new { id }, cancellationToken: ct));
 
         if (row == null) return null;
 
         return MapRowToTodo(row);
     }
 
-    public async Task<IEnumerable<TodoItem>> GetAllAsync(string userId, bool includeCompleted = false)
+    public async Task<IEnumerable<TodoItem>> GetAllAsync(string userId, bool includeCompleted = false, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateConnection(userId);
         string sql = "SELECT * FROM todos";
@@ -35,11 +35,11 @@ public class TodoRepository : ITodoRepository
         }
         sql += " ORDER BY created_at DESC";
 
-        var rows = await db.QueryAsync<dynamic>(sql);
+        var rows = await db.QueryAsync<dynamic>(new CommandDefinition(sql, cancellationToken: ct));
         return rows.Select(MapRowToTodo);
     }
 
-    public async Task<string> CreateAsync(string userId, TodoItem item)
+    public async Task<string> CreateAsync(string userId, TodoItem item, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(item.Id))
         {
@@ -51,7 +51,7 @@ public class TodoRepository : ITodoRepository
         item.CreatedBy = userId;
 
         using var db = _dbFactory.CreateConnection(userId);
-        await db.ExecuteAsync(@"
+        await db.ExecuteAsync(new CommandDefinition(@"
             INSERT INTO todos (id, title, description, due_at, reminder_at, source, created_by, created_at, updated_at, completed_at)
             VALUES (@Id, @Title, @Description, @DueAt, @ReminderAt, @Source, @CreatedBy, @CreatedAt, @UpdatedAt, @CompletedAt)",
             new {
@@ -65,17 +65,17 @@ public class TodoRepository : ITodoRepository
                 CreatedAt = item.CreatedAt.ToString("o"),
                 UpdatedAt = item.UpdatedAt.ToString("o"),
                 CompletedAt = item.CompletedAt?.ToString("o")
-            });
+            }, cancellationToken: ct));
 
         return item.Id;
     }
 
-    public async Task<bool> UpdateAsync(string userId, TodoItem item)
+    public async Task<bool> UpdateAsync(string userId, TodoItem item, CancellationToken ct = default)
     {
         item.UpdatedAt = DateTime.UtcNow;
 
         using var db = _dbFactory.CreateConnection(userId);
-        var affected = await db.ExecuteAsync(@"
+        var affected = await db.ExecuteAsync(new CommandDefinition(@"
             UPDATE todos 
             SET title = @Title, 
                 description = @Description, 
@@ -94,15 +94,15 @@ public class TodoRepository : ITodoRepository
                 UpdatedAt = item.UpdatedAt.ToString("o"),
                 CompletedAt = item.CompletedAt?.ToString("o"),
                 item.Id
-            });
+            }, cancellationToken: ct));
 
         return affected > 0;
     }
 
-    public async Task<bool> DeleteAsync(string userId, string id)
+    public async Task<bool> DeleteAsync(string userId, string id, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateConnection(userId);
-        var affected = await db.ExecuteAsync("DELETE FROM todos WHERE id = @id", new { id });
+        var affected = await db.ExecuteAsync(new CommandDefinition("DELETE FROM todos WHERE id = @id", new { id }, cancellationToken: ct));
         return affected > 0;
     }
 

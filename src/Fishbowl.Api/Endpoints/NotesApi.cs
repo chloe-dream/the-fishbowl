@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using System.Security.Claims;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 
@@ -12,51 +13,50 @@ public static class NotesApi
     {
         var group = routes.MapGroup("/api/notes");
 
-        group.MapGet("/", async (INoteRepository repo, HttpContext context) =>
+        group.MapGet("/", async (ClaimsPrincipal user, INoteRepository repo, CancellationToken ct) =>
         {
-            var userId = context.Request.Headers["X-Fishbowl-User-Id"].ToString();
-            if (string.IsNullOrEmpty(userId)) return Results.BadRequest("User ID missing");
+            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+            return Results.Ok(await repo.GetAllAsync(userId, ct));
+        });
+
+        group.MapGet("/{id}", async (string id, ClaimsPrincipal user, INoteRepository repo, CancellationToken ct) =>
+        {
+            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
             
-            return Results.Ok(await repo.GetAllAsync(userId));
+            var note = await repo.GetByIdAsync(userId, id, ct);
+            return note is not null ? Results.Ok(note) : Results.NotFound();
         });
 
-        group.MapGet("/{id}", async (string id, INoteRepository repo, HttpContext context) =>
+        group.MapPost("/", async (Note note, ClaimsPrincipal user, INoteRepository repo, CancellationToken ct) =>
         {
-            var userId = context.Request.Headers["X-Fishbowl-User-Id"].ToString();
-            if (string.IsNullOrEmpty(userId)) return Results.BadRequest("User ID missing");
+            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
-            var note = await repo.GetByIdAsync(userId, id);
-            return note != null ? Results.Ok(note) : Results.NotFound();
-        });
-
-        group.MapPost("/", async (Note note, INoteRepository repo, HttpContext context) =>
-        {
-            var userId = context.Request.Headers["X-Fishbowl-User-Id"].ToString();
-            if (string.IsNullOrEmpty(userId)) return Results.BadRequest("User ID missing");
-
-            var id = await repo.CreateAsync(userId, note);
+            var id = await repo.CreateAsync(userId, note, ct);
             return Results.Created($"/api/notes/{id}", note);
         });
 
-        group.MapPut("/{id}", async (string id, Note note, INoteRepository repo, HttpContext context) =>
+        group.MapPut("/{id}", async (string id, Note note, ClaimsPrincipal user, INoteRepository repo, CancellationToken ct) =>
         {
-            var userId = context.Request.Headers["X-Fishbowl-User-Id"].ToString();
-            if (string.IsNullOrEmpty(userId)) return Results.BadRequest("User ID missing");
+            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
             note.Id = id;
-            var updated = await repo.UpdateAsync(userId, note);
+            var updated = await repo.UpdateAsync(userId, note, ct);
             return updated ? Results.NoContent() : Results.NotFound();
         });
 
-        group.MapDelete("/{id}", async (string id, INoteRepository repo, HttpContext context) =>
+        group.MapDelete("/{id}", async (string id, ClaimsPrincipal user, INoteRepository repo, CancellationToken ct) =>
         {
-            var userId = context.Request.Headers["X-Fishbowl-User-Id"].ToString();
-            if (string.IsNullOrEmpty(userId)) return Results.BadRequest("User ID missing");
+            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
-            var deleted = await repo.DeleteAsync(userId, id);
-            return deleted ? Results.NoContent() : Results.NotFound();
+            var success = await repo.DeleteAsync(userId, id, ct);
+            return success ? Results.NoContent() : Results.NotFound();
         });
 
-        return group;
+        return group.RequireAuthorization();
     }
 }

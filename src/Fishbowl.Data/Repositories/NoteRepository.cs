@@ -15,25 +15,26 @@ public class NoteRepository : INoteRepository
         _dbFactory = dbFactory;
     }
 
-    public async Task<Note?> GetByIdAsync(string userId, string id)
+    public async Task<Note?> GetByIdAsync(string userId, string id, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateConnection(userId);
         var row = await db.QuerySingleOrDefaultAsync<dynamic>(
-            "SELECT * FROM notes WHERE id = @id", new { id });
+            new CommandDefinition("SELECT * FROM notes WHERE id = @id", new { id }, cancellationToken: ct));
 
         if (row == null) return null;
 
         return MapRowToNote(row);
     }
 
-    public async Task<IEnumerable<Note>> GetAllAsync(string userId)
+    public async Task<IEnumerable<Note>> GetAllAsync(string userId, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateConnection(userId);
-        var rows = await db.QueryAsync<dynamic>("SELECT * FROM notes ORDER BY updated_at DESC");
+        var rows = await db.QueryAsync<dynamic>(
+            new CommandDefinition("SELECT * FROM notes ORDER BY updated_at DESC", cancellationToken: ct));
         return rows.Select(MapRowToNote);
     }
 
-    public async Task<string> CreateAsync(string userId, Note note)
+    public async Task<string> CreateAsync(string userId, Note note, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(note.Id))
         {
@@ -45,7 +46,7 @@ public class NoteRepository : INoteRepository
         note.CreatedBy = userId;
 
         using var db = _dbFactory.CreateConnection(userId);
-        await db.ExecuteAsync(@"
+        await db.ExecuteAsync(new CommandDefinition(@"
             INSERT INTO notes (id, title, content, content_secret, type, tags, created_by, created_at, updated_at, pinned, archived)
             VALUES (@Id, @Title, @Content, @ContentSecret, @Type, @TagsJson, @CreatedBy, @CreatedAt, @UpdatedAt, @Pinned, @Archived)",
             new {
@@ -60,17 +61,17 @@ public class NoteRepository : INoteRepository
                 UpdatedAt = note.UpdatedAt.ToString("o"),
                 Pinned = note.Pinned ? 1 : 0,
                 Archived = note.Archived ? 1 : 0
-            });
+            }, cancellationToken: ct));
 
         return note.Id;
     }
 
-    public async Task<bool> UpdateAsync(string userId, Note note)
+    public async Task<bool> UpdateAsync(string userId, Note note, CancellationToken ct = default)
     {
         note.UpdatedAt = DateTime.UtcNow;
 
         using var db = _dbFactory.CreateConnection(userId);
-        var affected = await db.ExecuteAsync(@"
+        var affected = await db.ExecuteAsync(new CommandDefinition(@"
             UPDATE notes 
             SET title = @Title, 
                 content = @Content, 
@@ -91,15 +92,15 @@ public class NoteRepository : INoteRepository
                 Pinned = note.Pinned ? 1 : 0,
                 Archived = note.Archived ? 1 : 0,
                 note.Id
-            });
+            }, cancellationToken: ct));
 
         return affected > 0;
     }
 
-    public async Task<bool> DeleteAsync(string userId, string id)
+    public async Task<bool> DeleteAsync(string userId, string id, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateConnection(userId);
-        var affected = await db.ExecuteAsync("DELETE FROM notes WHERE id = @id", new { id });
+        var affected = await db.ExecuteAsync(new CommandDefinition("DELETE FROM notes WHERE id = @id", new { id }, cancellationToken: ct));
         return affected > 0;
     }
 

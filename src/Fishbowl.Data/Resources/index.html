@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Fishbowl | Personal Assistant</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/index.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo-container">
+                <div class="logo-bowl">
+                    <div class="fish"></div>
+                </div>
+                <h1>Fishbowl</h1>
+            </div>
+            
+            <nav class="nav-menu">
+                <button class="nav-item active" data-view="notes">
+                    <i class="fa-solid fa-note-sticky"></i>
+                    <span>Notes</span>
+                </button>
+                <!-- Other items removed until functional -->
+            </nav>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="content-header">
+                <div class="header-title">The Fishbowl</div>
+                <div class="user-profile">
+                    <div class="avatar" id="user-avatar">?</div>
+                </div>
+            </header>
+
+            <!-- Dynamic Viewport -->
+            <div id="active-view" class="view-container">
+                <!-- Notes View (Default) -->
+                <section class="notes-view">
+                    <div class="list-pane">
+                        <div class="pane-header">
+                            <h2>My Notes</h2>
+                            <button class="btn-icon" id="new-note-btn"><i class="fa-solid fa-plus"></i></button>
+                        </div>
+                        <div class="item-list" id="note-list">
+                            <!-- Items populated by JS -->
+                            <div class="item-skeleton"></div>
+                            <div class="item-skeleton"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="editor-pane">
+                        <div id="editor-empty-state" class="empty-state">
+                            <i class="fa-solid fa-fish-fins"></i>
+                            <p>Select a note to start writing</p>
+                        </div>
+                        <div id="note-editor" class="editor-container hidden">
+                            <div class="editor-header">
+                                <input type="text" class="title-input" id="note-title" placeholder="Note Title">
+                                <div class="editor-actions">
+                                    <button class="btn-icon-red" id="delete-note"><i class="fa-solid fa-trash"></i></button>
+                                </div>
+                            </div>
+                            <textarea id="note-content" class="content-area" placeholder="Start typing..."></textarea>
+                            <div class="editor-footer">
+                                <div class="tag-container" id="note-tags">
+                                    <!-- Tags populated by JS -->
+                                </div>
+                                <div id="last-saved" class="save-status"></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script src="js/app.js" type="module"></script>
+</body>
+</html>

@@ -36,7 +36,7 @@ public class ResourceProviderTests : IDisposable
         );
 
         // Act
-        var resource = await provider.GetAsync(testPath);
+        var resource = await provider.GetAsync(testPath, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.NotNull(resource);
@@ -57,18 +57,18 @@ public class ResourceProviderTests : IDisposable
         var provider = new ResourceProvider(_cache, _tempModsDir);
 
         // Act 1: First read (should hit disk)
-        var firstResource = await provider.GetAsync(testPath);
+        var firstResource = await provider.GetAsync(testPath, TestContext.Current.CancellationToken);
         Assert.Equal(initialContent, Encoding.UTF8.GetString(firstResource!.Data));
 
         // Act 2: Modify disk
         File.WriteAllText(filePath, "Modified Content");
 
         // Act 3: Read again (should hit cache)
-        var secondResource = await provider.GetAsync(testPath);
+        var secondResource = await provider.GetAsync(testPath, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(initialContent, Encoding.UTF8.GetString(secondResource!.Data));
-        Assert.Equal(ResourceSource.Disk, secondResource.Source); // Source is still Disk because that's where it was cached from
+        Assert.Equal(ResourceSource.Disk, secondResource.Source); 
     }
 
     [Fact]
@@ -80,11 +80,11 @@ public class ResourceProviderTests : IDisposable
         File.WriteAllText(filePath, "exists");
 
         var provider = new ResourceProvider(_cache, _tempModsDir);
-        await provider.GetAsync(testPath); // Cache it
+        await provider.GetAsync(testPath, TestContext.Current.CancellationToken); // Cache it
 
         // Act
         File.Delete(filePath); // Delete from disk
-        var exists = await provider.ExistsAsync(testPath);
+        var exists = await provider.ExistsAsync(testPath, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.True(exists, "Should return true even if deleted from disk, because it is cached.");
@@ -94,7 +94,6 @@ public class ResourceProviderTests : IDisposable
     public async Task GetAsync_ReturnsEmbeddedWhenDiskMissing_Test()
     {
         // Arrange
-        // (test.txt IS embedded in Fishbowl.Data)
         var provider = new ResourceProvider(
             cache: _cache,
             modsPath: _tempModsDir, 
@@ -102,7 +101,7 @@ public class ResourceProviderTests : IDisposable
         );
 
         // Act
-        var resource = await provider.GetAsync("test.txt");
+        var resource = await provider.GetAsync("test.txt", TestContext.Current.CancellationToken);
 
         // Assert
         Assert.NotNull(resource);
@@ -116,10 +115,48 @@ public class ResourceProviderTests : IDisposable
         var provider = new ResourceProvider(_cache, _tempModsDir);
 
         // Act
-        var resource = await provider.GetAsync("non-existent-file.xyz");
+        var resource = await provider.GetAsync("non-existent-file.xyz", TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Null(resource);
+    }
+
+    [Fact]
+    public async Task GetAsync_ResolvesSubFolderResourceWithForwardSlash_Test()
+    {
+        // Arrange
+        var provider = new ResourceProvider(
+            cache: _cache,
+            modsPath: _tempModsDir, 
+            embeddedAssembly: typeof(ResourceProvider).Assembly
+        );
+
+        // Act
+        // 'css/index.css' is embedded in Fishbowl.Data
+        var resource = await provider.GetAsync("css/index.css", TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.NotNull(resource);
+        Assert.Equal(ResourceSource.Embedded, resource.Source);
+    }
+
+    [Fact]
+    public async Task GetAsync_ResolvesSubFolderResourceWithBackslash_Test()
+    {
+        // Arrange
+        var provider = new ResourceProvider(
+            cache: _cache,
+            modsPath: _tempModsDir, 
+            embeddedAssembly: typeof(ResourceProvider).Assembly
+        );
+
+        // Act
+        // Even if requested with backslash, it should resolve (important for Windows paths)
+        var resource = await provider.GetAsync(@"css\index.css", TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.NotNull(resource);
+        Assert.Equal(ResourceSource.Embedded, resource.Source);
     }
 
     public void Dispose()
@@ -127,7 +164,7 @@ public class ResourceProviderTests : IDisposable
         _cache.Dispose();
         if (Directory.Exists(_tempModsDir))
         {
-            Directory.Delete(_tempModsDir, true);
+            try { Directory.Delete(_tempModsDir, true); } catch { }
         }
     }
 }
