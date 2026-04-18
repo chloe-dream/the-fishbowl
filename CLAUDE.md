@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-The Fishbowl is a self-hosted personal memory + assistant application. **`CONCEPT.md` is the full product/architecture spec** — much of it (Discord bot, search, sync, scripting, teams, apps, triggers) describes the target design, not what is built. Today, only `Fishbowl.Core`, `Fishbowl.Data`, `Fishbowl.Api`, and `Fishbowl.Host` have real implementations; the other projects (`Bot.Discord`, `Sync`, `Scheduler`, `Scripting`, `Search`) contain placeholder `Class1.cs` files. When making changes, align with CONCEPT.md — do not invent a different architecture.
+The Fishbowl is a self-hosted personal memory + assistant application. **`CONCEPT.md` is the full product/architecture spec** — much of it (Discord bot, search, sync, scripting, teams, apps, triggers) describes the target design, not what is built. Today, only `Fishbowl.Core`, `Fishbowl.Data`, `Fishbowl.Api`, and `Fishbowl.Host` have real implementations; the other projects (`Bot.Discord`, `Sync`, `Scheduler`, `Scripting`, `Search`) are empty shells waiting for their feature work. When making changes, align with CONCEPT.md — do not invent a different architecture.
+
+See `CONTRIBUTING.md` for the one-page feature-work recipe. See `docs/superpowers/` for active design specs and implementation plans.
 
 ## Working style — adaptive programming
 
@@ -69,19 +71,23 @@ Auth is Google OAuth + cookies. On first Google login, `Program.cs` (`OnTicketRe
 
 ### OAuth credentials live in `system.db`, not `appsettings.json`
 
-`GoogleOptions` is configured lazily via `AddOptions<GoogleOptions>().Configure<ISystemRepository, IWebHostEnvironment>(...)` that reads `Google:ClientId` / `Google:ClientSecret` from `system_config`. The setup flow (`GET /setup` + `POST /api/setup`) writes them. When running `Development`/`Localhost` without creds, placeholder dev values are auto-seeded into `system.db` — do not hardcode real credentials into `appsettings*.json`.
+`GoogleOptions` binds against `ConfigurationCache` (not `ISystemRepository` directly) via `AddOptions<GoogleOptions>().Configure<ConfigurationCache>(...)`. The cache is populated at host startup by `ConfigurationInitializer : IHostedService` reading `system_config`. `POST /api/setup` writes to both the DB and the cache so changes propagate without a restart. When unconfigured, options carry the sentinel `"placeholder"` (Google's built-in validation rejects empty strings). Never hardcode credentials in `appsettings*.json` or source.
 
 ### API paths must return 401, not redirect
 
-`OnRedirectToLogin` is overridden so requests under `/api/v1` get `401 Unauthorized` instead of a 302 to Google. This is intentional and covered by `AuthBehaviorTests.GetApiNotes_Returns401_NotRedirect_Test` — do not remove it (it avoids CORS/preflight chaos for API clients).
+`OnRedirectToLogin` is overridden so requests under `/api` get `401 Unauthorized` instead of a 302 to Google. This is intentional and covered by `AuthBehaviorTests.GetApiNotes_Returns401_NotRedirect_Test` — do not remove it (avoids CORS/preflight chaos for API clients). All public API routes live under `/api/v1/`; the OpenAPI document is at `/api/openapi.json`.
+
+### `/setup` is locked after configuration
+
+Once `Google:ClientId` is present in the cache, both `GET /setup` and `POST /api/setup` return `404` (not 302 — harder to bypass). `POST /api/setup` also validates: ClientId must end with `.apps.googleusercontent.com`, ClientSecret must be at least 20 chars. There is **no antiforgery** on `/api/setup` — CSRF requires a logged-in user, and `/setup` only responds when unconfigured.
 
 ### `IResourceProvider` serves the web UI (and will serve mods)
 
-`Fishbowl.Data.ResourceProvider` implements a three-tier lookup: **disk (`fishbowl-mods/{path}`) → database (not yet wired) → embedded resources** in `Fishbowl.Data.dll`. The Host's fallback route (`MapFallback`) delegates all non-API paths to it. Embedded resources are defined in `Fishbowl.Data.csproj` with `<EmbeddedResource Include="Resources\**\*" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />`. Because MSBuild's `RecursiveDir` produces Windows-style paths on Windows, the provider tries three fallbacks per lookup (`as-is` → backslashes → legacy dot-notation) — keep this fallback chain if touching that code. Resources are memory-cached; no hot-reload today (FileSystemWatcher mentioned in CONCEPT.md is not yet implemented).
+`Fishbowl.Data.ResourceProvider` implements a three-tier lookup: **disk (`fishbowl-mods/{path}`) → database (not yet wired) → embedded resources** in `Fishbowl.Data.dll`. The Host's fallback route (`MapFallback`) delegates non-API paths to it; `/api/*` requests that don't match a mapped endpoint are short-circuited to 404 so they don't accidentally serve `index.html`. Embedded resources are defined in `Fishbowl.Data.csproj` with `<EmbeddedResource Include="Resources\**\*" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />`. Because MSBuild's `RecursiveDir` produces Windows-style paths on Windows, the private `TryOpenEmbeddedStream` helper (used by both `GetAsync` and `ExistsAsync`) tries three path forms — keep that helper if you touch the code. Resources are memory-cached; no hot-reload today.
 
 ### Plugins load in isolated `AssemblyLoadContext`s
 
-`Fishbowl.Host.Plugins.PluginLoadContext` uses `AssemblyDependencyResolver` inside a collectible ALC so plugin DLLs in `fishbowl-mods/plugins/` can ship their own dependency versions without colliding with the host. Plugins implement `Fishbowl.Core.IFishbowlPlugin`. The `IFishbowlApi` surface is currently stubbed (`object` parameters with `TODO`s) — when implementing real plugin features, define the concrete `IBotClient` / `ISyncProvider` / `IScheduledJob` interfaces in `Fishbowl.Core` first.
+`Fishbowl.Host.Plugins.PluginLoadContext` uses `AssemblyDependencyResolver` inside a collectible ALC so plugin DLLs in `fishbowl-mods/plugins/` can ship their own dependency versions without colliding with the host. Plugins implement `IFishbowlPlugin` and register capabilities through `IFishbowlApi.AddBotClient / AddSyncProvider / AddScheduledJob` — contracts live in `Fishbowl.Core.Plugins`. `Fishbowl.Host.Plugins.PluginLoader.LoadPlugins(...)` runs at startup (configurable path via `Plugins:Path`, default `fishbowl-mods/plugins`); plugin load failures are logged and skipped — one bad plugin doesn't kill the host.
 
 ## Testing conventions
 
@@ -92,7 +98,16 @@ Auth is Google OAuth + cookies. On first Google login, `Program.cs` (`OnTicketRe
 
 ## Conventions worth knowing
 
-- **`Class1.cs` files mark not-yet-implemented projects.** They are placeholders; replace them when building out `Search`, `Sync`, `Scheduler`, `Scripting`, or `Bot.Discord`.
-- SQLite `DateTime` is stored as ISO-8601 strings (`DateTime.UtcNow.ToString("o")`). Booleans as `INTEGER DEFAULT 0/1`. Collections (e.g. `Note.Tags`) are JSON-serialized via `System.Text.Json`. Dapper `QuerySingleOrDefaultAsync<dynamic>` is used with manual row → model mapping in repositories.
-- Secrets in notes use a `::secret` markdown block and a separate `content_secret BLOB` column encrypted client-side. **Never include secret content in FTS indexing, embeddings, or chat responses** — this is a non-negotiable product rule from CONCEPT.md.
-- The "If the file exists on disk, use it; otherwise use the default" override pattern (see CONCEPT.md "Modding") applies uniformly to components, styles, scripts, templates, and plugins. Do not introduce registration manifests or whitelists for mods.
+- **Dapper uses typed queries with snake_case convention.** `DapperConventions.Install()` (called from `DatabaseFactory`'s static ctor) enables `MatchNamesWithUnderscores`, so `created_at` → `CreatedAt` works automatically. `JsonTagsHandler` serializes `List<string>` ↔ JSON text for the `notes.tags` column. Never write `QueryAsync<dynamic>` with a manual row-mapper — use `QueryAsync<T>` directly.
+- **Multi-step writes use the transaction helper.** `_dbFactory.WithUserTransactionAsync(userId, async (db, tx, ct) => { ... })` wraps begin/commit/rollback. `NoteRepository.CreateAsync/UpdateAsync/DeleteAsync` use it for `notes` + `notes_fts` syncing — copy that pattern for any repo that touches more than one table.
+- **FTS5 writes must stay in sync with the primary table.** `notes_fts.rowid` maps to `notes.rowid` via `(SELECT rowid FROM notes WHERE id = @Id)`. On delete, remove from `notes_fts` BEFORE `notes` (else the subquery returns nothing). Tags in `notes_fts` are a space-joined flat string (not JSON).
+- **Logging via `ILogger<T>`.** Every service that does non-trivial work takes an optional `ILogger<T>? logger = null` parameter defaulting to `NullLogger<T>.Instance`, so tests that construct objects directly still work. DI auto-injects the real logger in production. **Never log PII (email, name, content, secret values, OAuth tokens).**
+- SQLite `DateTime` is stored as ISO-8601 strings (`DateTime.UtcNow.ToString("o")`). Booleans as `INTEGER DEFAULT 0/1` (Dapper handles int↔bool natively via `Convert.ToBoolean`). IDs are ULIDs (`Ulid.NewUlid().ToString()`).
+- Secrets in notes use a `::secret` markdown block and a separate `content_secret BLOB` column encrypted client-side. **Never include secret content in FTS indexing, embeddings, or chat responses** — non-negotiable product rule from CONCEPT.md.
+- "If the file exists on disk, use it; otherwise use the default" — the override pattern from CONCEPT.md "Modding" applies uniformly to components, styles, scripts, templates, and plugins. Do not introduce registration manifests or whitelists for mods.
+
+## CI
+
+GitHub Actions:
+- `ci.yml` runs on every push to master and every PR. Matrix: `ubuntu-latest` + `windows-latest`. Gates: `dotnet format --verify-no-changes`, `dotnet build`, `dotnet test`. Keep these green.
+- `release.yml` runs on `v*` tag push or manual dispatch. Publishes four single-file binaries (`win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`) and attaches them to a GitHub Release on tag push only.
