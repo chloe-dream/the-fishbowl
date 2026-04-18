@@ -207,8 +207,14 @@ app.MapFallback("{*path}", async (HttpContext context, IResourceProvider resourc
     var path = context.Request.Path.Value?.TrimStart('/') ?? "index.html";
     if (string.IsNullOrEmpty(path)) path = "index.html";
 
+    // Don't serve UI for unversioned API paths (they should 404, not redirect to index.html)
+    if (path.StartsWith("api/", StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.NotFound();
+    }
+
     var resource = await resources.GetAsync(path);
-    
+
     if (resource == null)
     {
         if (path.Contains('.')) return Results.NotFound();

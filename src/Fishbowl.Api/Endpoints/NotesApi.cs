@@ -11,7 +11,7 @@ public static class NotesApi
 {
     public static RouteGroupBuilder MapNotesApi(this IEndpointRouteBuilder routes)
     {
-        var group = routes.MapGroup("/api/notes");
+        var group = routes.MapGroup("/api/v1/notes");
 
         group.MapGet("/", async (ClaimsPrincipal user, INoteRepository repo, CancellationToken ct) =>
         {
@@ -35,7 +35,7 @@ public static class NotesApi
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
             var id = await repo.CreateAsync(userId, note, ct);
-            return Results.Created($"/api/notes/{id}", note);
+            return Results.Created($"/api/v1/notes/{id}", note);
         });
 
         group.MapPut("/{id}", async (string id, Note note, ClaimsPrincipal user, INoteRepository repo, CancellationToken ct) =>

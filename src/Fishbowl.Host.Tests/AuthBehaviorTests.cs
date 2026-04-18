@@ -50,7 +50,7 @@ public class AuthBehaviorTests : IClassFixture<WebApplicationFactory<Program>>, 
         });
 
         // Act
-        var response = await client.GetAsync("/api/notes", TestContext.Current.CancellationToken);
+        var response = await client.GetAsync("/api/v1/notes", TestContext.Current.CancellationToken);
 
         // Assert
         // This is the CRITICAL fix for the CORS issue: 

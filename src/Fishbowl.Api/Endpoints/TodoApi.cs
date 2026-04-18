@@ -11,7 +11,7 @@ public static class TodoApi
 {
     public static RouteGroupBuilder MapTodoApi(this IEndpointRouteBuilder routes)
     {
-        var group = routes.MapGroup("/api/todos");
+        var group = routes.MapGroup("/api/v1/todos");
 
         group.MapGet("/", async (ClaimsPrincipal user, ITodoRepository repo, bool includeCompleted = false, CancellationToken ct = default) =>
         {
@@ -35,7 +35,7 @@ public static class TodoApi
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
             var id = await repo.CreateAsync(userId, item, ct);
-            return Results.Created($"/api/todos/{id}", item);
+            return Results.Created($"/api/v1/todos/{id}", item);
         });
 
         group.MapPut("/{id}", async (string id, TodoItem item, ClaimsPrincipal user, ITodoRepository repo, CancellationToken ct) =>

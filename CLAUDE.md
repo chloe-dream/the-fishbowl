@@ -10,7 +10,7 @@ The Fishbowl is a self-hosted personal memory + assistant application. **`CONCEP
 
 Before writing new code, find the closest existing solution in this codebase and **extend it**, don't parallel it. Concretely:
 
-- **HTTP endpoints** inherit the `MapXxxApi()` extension pattern on `IEndpointRouteBuilder` (see `src/Fishbowl.Api/Endpoints/NotesApi.cs`); they read the user via the `fishbowl_user_id` claim and call a repository.
+- **HTTP endpoints** inherit the `MapXxxApi()` extension pattern on `IEndpointRouteBuilder` (see `src/Fishbowl.Api/Endpoints/NotesApi.cs`); they read the user via the `fishbowl_user_id` claim and call a repository. Routes are versioned under `/api/v1/`.
 - **Repositories** have an interface in `Fishbowl.Core.Repositories` and an implementation in `Fishbowl.Data.Repositories`, registered as `AddScoped`. Data access goes through `DatabaseFactory.CreateConnection(userId)` (per-user DB) or `CreateSystemConnection()` (global `system.db`).
 - **Multi-step writes** use Dapper with an explicit transaction — `WithUserTransactionAsync` on `DatabaseFactory` once Phase 3 lands; before that, inline `BeginTransaction`/`Commit`/`Rollback`.
 - **Schema changes** add an `ApplyVN` method in `DatabaseFactory` and bump `PRAGMA user_version` — no EF Core, no migration runner.
@@ -73,7 +73,7 @@ Auth is Google OAuth + cookies. On first Google login, `Program.cs` (`OnTicketRe
 
 ### API paths must return 401, not redirect
 
-`OnRedirectToLogin` is overridden so requests under `/api` get `401 Unauthorized` instead of a 302 to Google. This is intentional and covered by `AuthBehaviorTests.GetApiNotes_Returns401_NotRedirect_Test` — do not remove it (it avoids CORS/preflight chaos for API clients).
+`OnRedirectToLogin` is overridden so requests under `/api/v1` get `401 Unauthorized` instead of a 302 to Google. This is intentional and covered by `AuthBehaviorTests.GetApiNotes_Returns401_NotRedirect_Test` — do not remove it (it avoids CORS/preflight chaos for API clients).
 
 ### `IResourceProvider` serves the web UI (and will serve mods)
 

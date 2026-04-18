@@ -87,27 +87,27 @@ public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
         var noteB = new Note { Title = "User B Note" };
 
         // Act 1: Post as User A
-        var requestA = new HttpRequestMessage(HttpMethod.Post, "/api/notes");
+        var requestA = new HttpRequestMessage(HttpMethod.Post, "/api/v1/notes");
         requestA.Headers.Add(TestAuthHandler.UserIdHeader, UserA);
         requestA.Content = JsonContent.Create(noteA);
         var responseA = await client.SendAsync(requestA, TestContext.Current.CancellationToken);
         Assert.True(responseA.IsSuccessStatusCode);
 
         // Act 2: Post as User B
-        var requestB = new HttpRequestMessage(HttpMethod.Post, "/api/notes");
+        var requestB = new HttpRequestMessage(HttpMethod.Post, "/api/v1/notes");
         requestB.Headers.Add(TestAuthHandler.UserIdHeader, UserB);
         requestB.Content = JsonContent.Create(noteB);
         var responseB = await client.SendAsync(requestB, TestContext.Current.CancellationToken);
         Assert.True(responseB.IsSuccessStatusCode);
 
         // Act 3: Get notes for User A
-        var getRequestA = new HttpRequestMessage(HttpMethod.Get, "/api/notes");
+        var getRequestA = new HttpRequestMessage(HttpMethod.Get, "/api/v1/notes");
         getRequestA.Headers.Add(TestAuthHandler.UserIdHeader, UserA);
         var getResponseA = await client.SendAsync(getRequestA, TestContext.Current.CancellationToken);
         var notesA = await getResponseA.Content.ReadFromJsonAsync<IEnumerable<Note>>(TestContext.Current.CancellationToken);
 
         // Act 4: Get notes for User B
-        var getRequestB = new HttpRequestMessage(HttpMethod.Get, "/api/notes");
+        var getRequestB = new HttpRequestMessage(HttpMethod.Get, "/api/v1/notes");
         getRequestB.Headers.Add(TestAuthHandler.UserIdHeader, UserB);
         var getResponseB = await client.SendAsync(getRequestB, TestContext.Current.CancellationToken);
         var notesB = await getResponseB.Content.ReadFromJsonAsync<IEnumerable<Note>>(TestContext.Current.CancellationToken);
@@ -128,13 +128,25 @@ public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
 
         // Act
         // Without the X-Test-User-Id header, TestAuthHandler will fail authentication
-        var response = await client.GetAsync("/api/notes", TestContext.Current.CancellationToken);
+        var response = await client.GetAsync("/api/v1/notes", TestContext.Current.CancellationToken);
 
         // Assert
         // In Minimal APIs with RequireAuthorization, it returns 401 Unauthorized if using a direct API client
-        // or redirects to /login if it thinks it's a browser. 
+        // or redirects to /login if it thinks it's a browser.
         // Our TestAuthHandler returns Fail, which results in 401.
         Assert.Equal(System.Net.HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Get_UnversionedPath_Returns404_Test()
+    {
+        var client = _factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/notes");
+        request.Headers.Add(TestAuthHandler.UserIdHeader, UserA);
+        var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
     }
 
     public void Dispose()
