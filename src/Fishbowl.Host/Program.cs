@@ -30,6 +30,10 @@ builder.Services.AddScoped<ISystemRepository, SystemRepository>();
 builder.Services.AddScoped<INoteRepository, NoteRepository>();
 builder.Services.AddScoped<ITodoRepository, TodoRepository>();
 
+// Load plugins from configured path (defaults to fishbowl-mods/plugins)
+var pluginsPath = builder.Configuration["Plugins:Path"] ?? "fishbowl-mods/plugins";
+Fishbowl.Host.Plugins.PluginLoader.LoadPlugins(builder.Services, pluginsPath);
+
 // Authentication Configuration
 builder.Services.AddAuthentication(options =>
 {
