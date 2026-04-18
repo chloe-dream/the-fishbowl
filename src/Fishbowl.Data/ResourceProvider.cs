@@ -1,6 +1,8 @@
 using System.Reflection;
 using Fishbowl.Core;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Fishbowl.Data;
 
@@ -9,12 +11,18 @@ public class ResourceProvider : IResourceProvider
     private readonly string _modsPath;
     private readonly Assembly _embeddedAssembly;
     private readonly IMemoryCache _cache;
+    private readonly ILogger<ResourceProvider> _logger;
 
-    public ResourceProvider(IMemoryCache cache, string modsPath = "fishbowl-mods", Assembly? embeddedAssembly = null)
+    public ResourceProvider(
+        IMemoryCache cache,
+        string modsPath = "fishbowl-mods",
+        Assembly? embeddedAssembly = null,
+        ILogger<ResourceProvider>? logger = null)
     {
         _cache = cache;
         _modsPath = modsPath;
         _embeddedAssembly = embeddedAssembly ?? Assembly.GetExecutingAssembly();
+        _logger = logger ?? NullLogger<ResourceProvider>.Instance;
     }
 
     public async Task<Resource?> GetAsync(string path, CancellationToken ct = default)
@@ -43,7 +51,10 @@ public class ResourceProvider : IResourceProvider
         }
 
         if (resource != null)
+        {
+            _logger.LogDebug("Resource {Path} served from {Source}", resource.Path, resource.Source);
             _cache.Set(path, resource);
+        }
 
         return resource;
     }

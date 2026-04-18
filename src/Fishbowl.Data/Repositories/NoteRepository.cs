@@ -2,16 +2,20 @@ using System.Data;
 using Dapper;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Fishbowl.Data.Repositories;
 
 public class NoteRepository : INoteRepository
 {
     private readonly DatabaseFactory _dbFactory;
+    private readonly ILogger<NoteRepository> _logger;
 
-    public NoteRepository(DatabaseFactory dbFactory)
+    public NoteRepository(DatabaseFactory dbFactory, ILogger<NoteRepository>? logger = null)
     {
         _dbFactory = dbFactory;
+        _logger = logger ?? NullLogger<NoteRepository>.Instance;
     }
 
     public async Task<Note?> GetByIdAsync(string userId, string id, CancellationToken ct = default)
@@ -32,6 +36,8 @@ public class NoteRepository : INoteRepository
     {
         if (string.IsNullOrEmpty(note.Id))
             note.Id = Ulid.NewUlid().ToString();
+
+        _logger.LogDebug("Creating note {Id} for user {UserId}", note.Id, userId);
 
         note.CreatedAt = DateTime.UtcNow;
         note.UpdatedAt = note.CreatedAt;
@@ -91,6 +97,10 @@ public class NoteRepository : INoteRepository
                         note.Id, note.Title, note.Content,
                         TagsFlat = string.Join(' ', note.Tags)
                     }, transaction: tx, cancellationToken: token));
+            }
+            else
+            {
+                _logger.LogWarning("Update of note {Id} for user {UserId} matched no rows", note.Id, userId);
             }
 
             return affected > 0;

@@ -1,6 +1,8 @@
 using System.Data;
 using Microsoft.Data.Sqlite;
 using Dapper;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Fishbowl.Data;
 
@@ -9,14 +11,17 @@ public class DatabaseFactory
     private readonly string _dataRoot;
     private readonly string _usersPath;
     private readonly string _systemDbPath;
+    private readonly ILogger<DatabaseFactory> _logger;
 
     static DatabaseFactory()
     {
         Fishbowl.Data.Dapper.DapperConventions.Install();
     }
 
-    public DatabaseFactory(string dataRoot = "fishbowl-data")
+    public DatabaseFactory(string dataRoot = "fishbowl-data", ILogger<DatabaseFactory>? logger = null)
     {
+        _logger = logger ?? NullLogger<DatabaseFactory>.Instance;
+
         // Ensure absolute or relative path is handled correctly
         _dataRoot = Path.GetFullPath(dataRoot);
         _usersPath = Path.Combine(_dataRoot, "users");
@@ -102,6 +107,7 @@ public class DatabaseFactory
         {
             ApplyUserInitialSchema(connection);
             connection.Execute("PRAGMA user_version = 1");
+            _logger.LogInformation("Applied user schema v1 to {DbPath}", ((SqliteConnection)connection).DataSource);
         }
     }
 
@@ -113,6 +119,7 @@ public class DatabaseFactory
         {
             ApplySystemInitialSchema(connection);
             connection.Execute("PRAGMA user_version = 1");
+            _logger.LogInformation("Applied system schema v1");
         }
     }
 

@@ -2,16 +2,20 @@ using System.Data;
 using Dapper;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Fishbowl.Data.Repositories;
 
 public class TodoRepository : ITodoRepository
 {
     private readonly DatabaseFactory _dbFactory;
+    private readonly ILogger<TodoRepository> _logger;
 
-    public TodoRepository(DatabaseFactory dbFactory)
+    public TodoRepository(DatabaseFactory dbFactory, ILogger<TodoRepository>? logger = null)
     {
         _dbFactory = dbFactory;
+        _logger = logger ?? NullLogger<TodoRepository>.Instance;
     }
 
     public async Task<TodoItem?> GetByIdAsync(string userId, string id, CancellationToken ct = default)
@@ -40,6 +44,8 @@ public class TodoRepository : ITodoRepository
         {
             item.Id = Ulid.NewUlid().ToString();
         }
+
+        _logger.LogDebug("Creating todo {Id} for user {UserId}", item.Id, userId);
 
         item.CreatedAt = DateTime.UtcNow;
         item.UpdatedAt = item.CreatedAt;
@@ -72,13 +78,13 @@ public class TodoRepository : ITodoRepository
 
         using var db = _dbFactory.CreateConnection(userId);
         var affected = await db.ExecuteAsync(new CommandDefinition(@"
-            UPDATE todos 
-            SET title = @Title, 
-                description = @Description, 
-                due_at = @DueAt, 
-                reminder_at = @ReminderAt, 
-                source = @Source, 
-                updated_at = @UpdatedAt, 
+            UPDATE todos
+            SET title = @Title,
+                description = @Description,
+                due_at = @DueAt,
+                reminder_at = @ReminderAt,
+                source = @Source,
+                updated_at = @UpdatedAt,
                 completed_at = @CompletedAt
             WHERE id = @Id",
             new
@@ -92,6 +98,11 @@ public class TodoRepository : ITodoRepository
                 CompletedAt = item.CompletedAt?.ToString("o"),
                 item.Id
             }, cancellationToken: ct));
+
+        if (affected == 0)
+        {
+            _logger.LogWarning("Update of todo {Id} for user {UserId} matched no rows", item.Id, userId);
+        }
 
         return affected > 0;
     }

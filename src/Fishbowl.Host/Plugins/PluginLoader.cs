@@ -1,14 +1,21 @@
 using Fishbowl.Core;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Fishbowl.Host.Plugins;
 
 public static class PluginLoader
 {
-    public static void LoadPlugins(IServiceCollection services, string pluginsPath)
+    public static void LoadPlugins(IServiceCollection services, string pluginsPath, ILogger? logger = null)
     {
+        logger ??= NullLogger.Instance;
+
         if (!Directory.Exists(pluginsPath))
+        {
+            logger.LogDebug("Plugins path {Path} does not exist; skipping plugin load", pluginsPath);
             return;
+        }
 
         var api = new FishbowlApi(services);
 
@@ -26,12 +33,12 @@ public static class PluginLoader
                 {
                     var plugin = (IFishbowlPlugin)Activator.CreateInstance(type)!;
                     plugin.Register(services, api);
-                    Console.WriteLine($"[Plugin] Loaded {plugin.Name} v{plugin.Version} from {Path.GetFileName(dllPath)}");
+                    logger.LogInformation("Loaded plugin {Name} v{Version} from {File}", plugin.Name, plugin.Version, Path.GetFileName(dllPath));
                 }
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[Plugin] Failed to load {Path.GetFileName(dllPath)}: {ex.Message}");
+                logger.LogError(ex, "Failed to load plugin {File}", Path.GetFileName(dllPath));
             }
         }
     }

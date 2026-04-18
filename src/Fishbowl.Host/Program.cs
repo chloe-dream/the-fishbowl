@@ -9,6 +9,7 @@ using Fishbowl.Data.Repositories;
 using Fishbowl.Api.Endpoints;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 using Fishbowl.Host;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -19,11 +20,13 @@ builder.Services.AddSingleton<IResourceProvider, ResourceProvider>(sp =>
     new ResourceProvider(
         cache: sp.GetRequiredService<IMemoryCache>(),
         modsPath: "fishbowl-mods",
-        embeddedAssembly: typeof(ResourceProvider).Assembly));
+        embeddedAssembly: typeof(ResourceProvider).Assembly,
+        logger: sp.GetRequiredService<ILogger<ResourceProvider>>()));
 
 // Consistent data root from CLI or default
 var dataPath = builder.Configuration["data"] ?? "fishbowl-data";
-builder.Services.AddSingleton<DatabaseFactory>(new DatabaseFactory(dataPath));
+builder.Services.AddSingleton<DatabaseFactory>(sp =>
+    new DatabaseFactory(dataPath, sp.GetRequiredService<ILogger<DatabaseFactory>>()));
 
 // Register Repositories
 builder.Services.AddScoped<ISystemRepository, SystemRepository>();
@@ -32,7 +35,13 @@ builder.Services.AddScoped<ITodoRepository, TodoRepository>();
 
 // Load plugins from configured path (defaults to fishbowl-mods/plugins)
 var pluginsPath = builder.Configuration["Plugins:Path"] ?? "fishbowl-mods/plugins";
-Fishbowl.Host.Plugins.PluginLoader.LoadPlugins(builder.Services, pluginsPath);
+using (var tempLoggerFactory = LoggerFactory.Create(lb => lb.AddConsole()))
+{
+    Fishbowl.Host.Plugins.PluginLoader.LoadPlugins(
+        builder.Services,
+        pluginsPath,
+        tempLoggerFactory.CreateLogger("PluginLoader"));
+}
 
 // Authentication Configuration
 builder.Services.AddAuthentication(options =>
@@ -86,6 +95,9 @@ builder.Services.AddAuthentication(options =>
 
             await repo.CreateUserAsync(internalUserId, name, email, avatar);
             await repo.CreateUserMappingAsync(internalUserId, provider, providerId);
+
+            var provisionLogger = context.HttpContext.RequestServices.GetService<ILoggerFactory>()?.CreateLogger("Auth");
+            provisionLogger?.LogInformation("Provisioned user {UserId} via {Provider}", internalUserId, provider);
         }
 
         // Add internal ID as a claim - this is what our APIs will use

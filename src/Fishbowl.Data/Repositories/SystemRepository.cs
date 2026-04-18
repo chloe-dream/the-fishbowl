@@ -1,16 +1,20 @@
 using System.Data;
 using Dapper;
 using Fishbowl.Core.Repositories;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Fishbowl.Data.Repositories;
 
 public class SystemRepository : ISystemRepository
 {
     private readonly DatabaseFactory _dbFactory;
+    private readonly ILogger<SystemRepository> _logger;
 
-    public SystemRepository(DatabaseFactory dbFactory)
+    public SystemRepository(DatabaseFactory dbFactory, ILogger<SystemRepository>? logger = null)
     {
         _dbFactory = dbFactory;
+        _logger = logger ?? NullLogger<SystemRepository>.Instance;
     }
 
     public async Task<string?> GetUserIdByMappingAsync(string provider, string providerId, CancellationToken ct = default)
@@ -36,6 +40,12 @@ public class SystemRepository : ISystemRepository
         var affected = await db.ExecuteAsync(
             new CommandDefinition("INSERT INTO users (id, name, email, avatar_url, created_at) VALUES (@userId, @name, @email, @avatarUrl, @createdAt)",
             new { userId, name, email, avatarUrl, createdAt = DateTime.UtcNow.ToString("o") }, cancellationToken: ct));
+
+        if (affected > 0)
+        {
+            _logger.LogInformation("Provisioned user {UserId}", userId);
+        }
+
         return affected > 0;
     }
 
@@ -58,10 +68,16 @@ public class SystemRepository : ISystemRepository
         using var db = _dbFactory.CreateSystemConnection();
         var affected = await db.ExecuteAsync(
             new CommandDefinition(@"
-                INSERT INTO system_config (key, value, updated_at) 
+                INSERT INTO system_config (key, value, updated_at)
                 VALUES (@key, @value, @updatedAt)
                 ON CONFLICT(key) DO UPDATE SET value = @value, updated_at = @updatedAt",
             new { key, value, updatedAt = DateTime.UtcNow.ToString("o") }, cancellationToken: ct));
+
+        if (affected > 0)
+        {
+            _logger.LogDebug("Config key {Key} updated", key);
+        }
+
         return affected > 0;
     }
 }
