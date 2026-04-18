@@ -1,3 +1,4 @@
+using Fishbowl.Core.Plugins;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Fishbowl.Core;
@@ -13,11 +14,11 @@ public interface IFishbowlPlugin
 }
 
 /// <summary>
-/// Core API provided to plugins during registration.
+/// Capability registration surface provided to plugins during Register().
 /// </summary>
 public interface IFishbowlApi
 {
-    void AddBotClient(object client); // TODO: Define IBotClient
-    void AddSyncProvider(object provider); // TODO: Define ISyncProvider
-    void AddScheduledJob(object job); // TODO: Define IScheduledJob
+    void AddBotClient(IBotClient client);
+    void AddSyncProvider(ISyncProvider provider);
+    void AddScheduledJob(IScheduledJob job);
 }
