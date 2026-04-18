@@ -7,7 +7,7 @@ using Xunit;
 
 namespace Fishbowl.Host.Tests;
 
-public class AuthBehaviorTests : IClassFixture<WebApplicationFactory<Program>>
+public class AuthBehaviorTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;
     private readonly string _testDataDir;
@@ -28,6 +28,15 @@ public class AuthBehaviorTests : IClassFixture<WebApplicationFactory<Program>>
                 services.AddSingleton<DatabaseFactory>(new DatabaseFactory(_testDataDir));
             });
         });
+    }
+
+    public void Dispose()
+    {
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        if (Directory.Exists(_testDataDir))
+        {
+            try { Directory.Delete(_testDataDir, true); } catch { }
+        }
     }
 
     [Fact]

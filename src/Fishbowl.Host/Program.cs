@@ -91,7 +91,7 @@ builder.Services.AddAuthentication(options =>
 });
 
 // Delay Google Configuration until ISystemRepository is available.
-// Empty creds are valid — /login redirects to /setup when ClientId is unconfigured.
+// When unconfigured, options get the sentinel "placeholder" (see inner comment).
 builder.Services.AddOptions<GoogleOptions>(GoogleDefaults.AuthenticationScheme)
     .Configure<ISystemRepository>((options, repo) =>
     {
