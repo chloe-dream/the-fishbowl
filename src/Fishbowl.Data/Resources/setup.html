@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Fishbowl | Setup</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --text: #f8fafc;
+            --muted: #94a3b8;
+            --accent: #38bdf8;
+            --accent-hover: #0ea5e9;
+        }
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .setup-card {
+            background: var(--card);
+            padding: 2.5rem;
+            border-radius: 1.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            width: 100%;
+            max-width: 450px;
+            text-align: center;
+        }
+        h1 { font-weight: 800; margin-bottom: 0.5rem; color: var(--accent); }
+        p { color: var(--muted); margin-bottom: 2rem; line-height: 1.5; }
+        .form-group { text-align: left; margin-bottom: 1.5rem; }
+        label { display: block; margin-bottom: 0.5rem; font-size: 0.9rem; font-weight: 600; color: var(--muted); }
+        input {
+            width: 100%;
+            padding: 0.8rem;
+            background: rgba(15, 23, 42, 0.5);
+            border: 1px solid #334155;
+            border-radius: 0.5rem;
+            color: white;
+            font-family: inherit;
+            box-sizing: border-box;
+        }
+        input:focus { outline: none; border-color: var(--accent); }
+        button {
+            width: 100%;
+            padding: 1rem;
+            background: var(--accent);
+            color: #0f172a;
+            border: none;
+            border-radius: 0.5rem;
+            font-weight: 800;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 1rem;
+        }
+        button:hover { background: var(--accent-hover); transform: translateY(-1px); }
+        .footer { margin-top: 1.5rem; font-size: 0.8rem; color: var(--muted); }
+        .footer a { color: var(--accent); text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="setup-card">
+        <i class="fa-solid fa-fish-fins fa-3x" style="color: var(--accent); margin-bottom: 1rem;"></i>
+        <h1>Welcome to Fishbowl</h1>
+        <p>Your data is almost ready. To enable login, please provide your Google OAuth credentials.</p>
+        
+        <div class="form-group">
+            <label for="clientId">Google Client ID</label>
+            <input type="text" id="clientId" placeholder="123456789-abc.apps.googleusercontent.com">
+        </div>
+        
+        <div class="form-group">
+            <label for="clientSecret">Google Client Secret</label>
+            <input type="password" id="clientSecret" placeholder="GOCSPX-...">
+        </div>
+
+        <div class="form-group" style="margin-top: 2rem; padding: 1rem; background: rgba(56, 189, 248, 0.05); border: 1px dashed var(--accent); border-radius: 0.5rem;">
+            <label style="color: var(--accent);"><i class="fa-solid fa-link"></i> Authorized Redirect URI</label>
+            <div id="redirect-uri" style="font-family: monospace; font-size: 0.85rem; word-break: break-all; margin-top: 0.5rem; color: var(--text);">
+                Loading...
+            </div>
+            <div style="font-size: 0.7rem; color: var(--muted); margin-top: 0.5rem;">
+                Add this URI to your Google Cloud Console project settings.
+            </div>
+        </div>
+        
+        <button id="save-btn">Complete Setup</button>
+        
+        <div class="footer">
+            Need help? <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console <i class="fa-solid fa-external-link" style="font-size: 0.7rem;"></i></a>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('redirect-uri').innerText = window.location.origin + '/signin-google';
+
+        document.getElementById('save-btn').onclick = async () => {
+            const clientId = document.getElementById('clientId').value;
+            const clientSecret = document.getElementById('clientSecret').value;
+            
+            if (!clientId || !clientSecret) {
+                alert("Please fill in both fields");
+                return;
+            }
+            
+            const res = await fetch('/api/setup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ clientId, clientSecret })
+            });
+            
+            if (res.ok) {
+                alert("Setup complete! Redirecting to login...");
+                window.location.href = '/login';
+            } else {
+                alert("Failed to save configuration.");
+            }
+        };
+    </script>
+</body>
+</html>

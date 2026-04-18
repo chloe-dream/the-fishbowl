@@ -28,8 +28,31 @@ public class DatabaseFactoryTests : IDisposable
         using var connection = factory.CreateConnection(userId);
 
         // Assert
-        var dbPath = Path.Combine(_tempDbDir, $"{userId}.db");
+        // Databases are now stored in a /users subfolder
+        var dbPath = Path.Combine(_tempDbDir, "users", $"{userId}.db");
         Assert.True(File.Exists(dbPath));
+    }
+
+    [Fact]
+    public void CreateSystemConnection_CreatesAndInitializesSystemDb_Test()
+    {
+        // Arrange
+        var factory = new DatabaseFactory(_tempDbDir);
+
+        // Act
+        using var connection = factory.CreateSystemConnection();
+
+        // Assert
+        var dbPath = Path.Combine(_tempDbDir, "system.db");
+        Assert.True(File.Exists(dbPath));
+
+        var tables = connection.Query<string>("SELECT name FROM sqlite_master WHERE type='table'").ToList();
+        Assert.Contains("users", tables);
+        Assert.Contains("user_mappings", tables);
+        Assert.Contains("system_config", tables);
+
+        var version = connection.ExecuteScalar<long>("PRAGMA user_version");
+        Assert.Equal(1, version);
     }
 
     [Fact]

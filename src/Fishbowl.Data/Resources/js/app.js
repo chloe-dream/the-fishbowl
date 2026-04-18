@@ -16,11 +16,6 @@ function debounce(func, wait) {
 }
 
 class AdminAPI {
-    constructor() {
-        this.userId = null;
-        this.vaultKey = sessionStorage.getItem('fishbowl_vault_key');
-    }
-
     async request(path, options = {}) {
         const headers = {
             'Content-Type': 'application/json',
@@ -62,31 +57,16 @@ const newNoteBtn = document.getElementById('new-note-btn');
 
 // Initialize
 async function init() {
-    checkVaultSecurity();
     await refreshNoteList();
     setupEventListeners();
 }
 
-function checkVaultSecurity() {
-    if (!api.vaultKey) {
-        const warning = document.createElement('div');
-        warning.style.cssText = 'background: var(--sunset-red); color: white; padding: 10px; text-align: center; font-weight: 600; cursor: pointer;';
-        warning.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Vault Not Initialized. Click to set your Master Password.';
-        warning.onclick = () => {
-            const pw = prompt("Set your Master Password. IMPORTANT: Write it down and keep it safe!");
-            if (pw) {
-                sessionStorage.setItem('fishbowl_vault_key', btoa(pw));
-                window.location.reload();
-            }
-        };
-        document.body.prepend(warning);
-    }
-}
-
-function updateSaveStatus(status, color = 'var(--text-muted)') {
+function updateSaveStatus(status, color = 'var(--text-secondary)') {
     const el = document.getElementById('last-saved');
     if (!el) return;
-    el.innerHTML = `<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${color}; margin-right:8px;"></span> ${status}`;
+    
+    const dot = color === 'var(--text-secondary)' ? '' : `<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${color}; margin-right:8px;"></span>`;
+    el.innerHTML = `${dot} ${status}`;
 }
 
 async function refreshNoteList() {
@@ -99,6 +79,13 @@ async function refreshNoteList() {
 }
 
 function renderNoteList() {
+    if (!noteList) return;
+    
+    if (notes.length === 0) {
+        noteList.innerHTML = '<div style="padding: 20px; color: var(--text-secondary); text-align: center; font-size: 0.9rem;">No notes yet</div>';
+        return;
+    }
+
     noteList.innerHTML = notes.map(note => `
         <div class="note-item ${currentNote?.id === note.id ? 'active' : ''}" data-id="${note.id}">
             <h3>${note.title || 'Untitled Note'}</h3>
@@ -127,7 +114,7 @@ async function selectNote(id) {
 const autoSave = debounce(async () => {
     if (!currentNote) return;
     
-    updateSaveStatus('Saving...', 'var(--sunset-orange)');
+    updateSaveStatus('Saving...', 'var(--gold)');
     
     const updatedNote = {
         ...currentNote,
@@ -141,7 +128,7 @@ const autoSave = debounce(async () => {
         if (index !== -1) notes[index] = updatedNote;
         
         renderNoteList();
-        updateSaveStatus(`Saved at ${new Date().toLocaleTimeString()}`, 'var(--sunset-gold)');
+        updateSaveStatus(`Saved at ${new Date().toLocaleTimeString()}`, 'var(--seafoam)');
     } catch (e) {
         console.error("Failed to auto-save", e);
         updateSaveStatus('Save Failed', 'var(--sunset-red)');
@@ -180,10 +167,10 @@ async function deleteCurrentNote() {
 }
 
 function setupEventListeners() {
-    deleteBtn.addEventListener('click', deleteCurrentNote);
-    newNoteBtn.addEventListener('click', createNewNote);
-    titleInput.addEventListener('input', autoSave);
-    contentInput.addEventListener('input', autoSave);
+    if (deleteBtn) deleteBtn.addEventListener('click', deleteCurrentNote);
+    if (newNoteBtn) newNoteBtn.addEventListener('click', createNewNote);
+    if (titleInput) titleInput.addEventListener('input', autoSave);
+    if (contentInput) contentInput.addEventListener('input', autoSave);
 }
 
 document.addEventListener('DOMContentLoaded', init);

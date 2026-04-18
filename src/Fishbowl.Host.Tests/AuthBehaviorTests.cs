@@ -38,7 +38,26 @@ public class AuthBehaviorTests : IClassFixture<WebApplicationFactory<Program>>
     }
 
     [Fact]
-    public async Task GetLogin_RedirectsToGoogleChallenge_Test()
+    public async Task GetLogin_ReturnsOk_Page_Test()
+    {
+        // Arrange
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+        
+        // Act
+        var response = await client.GetAsync("/login", TestContext.Current.CancellationToken);
+
+        // Assert
+        // The landing page should return 200 OK as it is now an HTML page
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("The Fishbowl", content);
+    }
+
+    [Fact]
+    public async Task GetLoginChallenge_RedirectsToGoogle_Test()
     {
         // Arrange
         var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
@@ -47,14 +66,13 @@ public class AuthBehaviorTests : IClassFixture<WebApplicationFactory<Program>>
         });
 
         // Act
-        var response = await client.GetAsync("/login", TestContext.Current.CancellationToken);
+        var response = await client.GetAsync("/login/challenge/google", TestContext.Current.CancellationToken);
 
         // Assert
-        // Proves that the /login endpoint we added correctly triggers the Google challenge.
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         var location = response.Headers.Location?.ToString();
         Assert.Contains("accounts.google.com", location);
-        Assert.Contains("client_id=placeholder-client-id", location);
+        Assert.Contains("client_id=1049281787342", location); // Check for start of our seeded dev client id
     }
 
     [Fact]

@@ -15,14 +15,14 @@ public static class NotesApi
 
         group.MapGet("/", async (ClaimsPrincipal user, INoteRepository repo, CancellationToken ct) =>
         {
-            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
             return Results.Ok(await repo.GetAllAsync(userId, ct));
         });
 
         group.MapGet("/{id}", async (string id, ClaimsPrincipal user, INoteRepository repo, CancellationToken ct) =>
         {
-            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
             
             var note = await repo.GetByIdAsync(userId, id, ct);
@@ -31,7 +31,7 @@ public static class NotesApi
 
         group.MapPost("/", async (Note note, ClaimsPrincipal user, INoteRepository repo, CancellationToken ct) =>
         {
-            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
             var id = await repo.CreateAsync(userId, note, ct);
@@ -40,7 +40,7 @@ public static class NotesApi
 
         group.MapPut("/{id}", async (string id, Note note, ClaimsPrincipal user, INoteRepository repo, CancellationToken ct) =>
         {
-            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
             note.Id = id;
@@ -50,7 +50,7 @@ public static class NotesApi
 
         group.MapDelete("/{id}", async (string id, ClaimsPrincipal user, INoteRepository repo, CancellationToken ct) =>
         {
-            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
             var success = await repo.DeleteAsync(userId, id, ct);

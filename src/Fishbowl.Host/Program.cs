@@ -8,6 +8,7 @@ using Fishbowl.Core.Repositories;
 using Fishbowl.Data.Repositories;
 using Fishbowl.Api.Endpoints;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
 using Fishbowl.Host;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -20,9 +21,12 @@ builder.Services.AddSingleton<IResourceProvider, ResourceProvider>(sp =>
         modsPath: "fishbowl-mods", 
         embeddedAssembly: typeof(ResourceProvider).Assembly));
 
-builder.Services.AddSingleton<DatabaseFactory>(new DatabaseFactory("fishbowl-data/users"));
+// Consistent data root from CLI or default
+var dataPath = builder.Configuration["data"] ?? "fishbowl-data";
+builder.Services.AddSingleton<DatabaseFactory>(new DatabaseFactory(dataPath));
 
 // Register Repositories
+builder.Services.AddScoped<ISystemRepository, SystemRepository>();
 builder.Services.AddScoped<INoteRepository, NoteRepository>();
 builder.Services.AddScoped<ITodoRepository, TodoRepository>();
 
@@ -30,7 +34,6 @@ builder.Services.AddScoped<ITodoRepository, TodoRepository>();
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-    // We set challenge to Cookies so that unauthenticated requests hit our OnRedirectToLogin logic first.
     options.DefaultChallengeScheme = CookieAuthenticationDefaults.AuthenticationScheme;
 })
 .AddCookie(options => 
@@ -44,17 +47,70 @@ builder.Services.AddAuthentication(options =>
         }
         else
         {
+            // If we are in "Setup Mode" (no valid Google Config), 
+            // we should probably redirect to /setup instead of /login (which challenges Google)
+            // For now, /login handles it.
             context.Response.Redirect(context.RedirectUri);
         }
         return Task.CompletedTask;
     };
 })
-.AddGoogle(options =>
+.AddGoogle(options => 
 {
-    options.ClientId = builder.Configuration["Authentication:Google:ClientId"] ?? "placeholder-client-id";
-    options.ClientSecret = builder.Configuration["Authentication:Google:ClientSecret"] ?? "placeholder-client-secret";
+    // These will be overridden by OpenOptions below
+    options.ClientId = "placeholder";
+    options.ClientSecret = "placeholder";
     options.SaveTokens = true;
+
+    options.Events.OnTicketReceived = async context =>
+    {
+        var repo = context.HttpContext.RequestServices.GetRequiredService<ISystemRepository>();
+        var provider = "google";
+        var providerId = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (string.IsNullOrEmpty(providerId)) return;
+
+        var internalUserId = await repo.GetUserIdByMappingAsync(provider, providerId);
+        
+        if (string.IsNullOrEmpty(internalUserId))
+        {
+            // CREATE NEW USER (GUID)
+            internalUserId = Guid.NewGuid().ToString();
+            var name = context.Principal?.FindFirstValue(ClaimTypes.Name);
+            var email = context.Principal?.FindFirstValue(ClaimTypes.Email);
+            var avatar = context.Principal?.FindFirstValue("urn:google:image");
+
+            await repo.CreateUserAsync(internalUserId, name, email, avatar);
+            await repo.CreateUserMappingAsync(internalUserId, provider, providerId);
+        }
+
+        // Add internal ID as a claim - this is what our APIs will use
+        var identity = (ClaimsIdentity)context.Principal!.Identity!;
+        identity.AddClaim(new Claim("fishbowl_user_id", internalUserId));
+    };
 });
+
+// Delay Google Configuration until ISystemRepository is available
+builder.Services.AddOptions<GoogleOptions>(GoogleDefaults.AuthenticationScheme)
+    .Configure<ISystemRepository, IWebHostEnvironment>((options, repo, env) => 
+    {
+        var clientId = repo.GetConfigAsync("Google:ClientId").GetAwaiter().GetResult();
+        var clientSecret = repo.GetConfigAsync("Google:ClientSecret").GetAwaiter().GetResult();
+
+        // Localhost Auto-Seeding
+        if (string.IsNullOrEmpty(clientId) && (env.IsDevelopment() || env.IsEnvironment("Localhost")))
+        {
+            // Fallback to development credentials for localhost
+            clientId = "1049281787342-9vrtp7kqv55ge6l5l1iaa62t1q7v1b1r.apps.googleusercontent.com";
+            clientSecret = "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b5"; // Note: These should be real dev ones if provided, or placeholders
+            
+            repo.SetConfigAsync("Google:ClientId", clientId).GetAwaiter().GetResult();
+            repo.SetConfigAsync("Google:ClientSecret", clientSecret).GetAwaiter().GetResult();
+        }
+
+        options.ClientId = clientId ?? "placeholder";
+        options.ClientSecret = clientSecret ?? "placeholder";
+    });
 
 builder.Services.AddAuthorization();
 
@@ -77,11 +133,70 @@ if (!app.Environment.IsEnvironment("Testing"))
 }
 
 // Register Auth Endpoints
-app.MapGet("/login", (string? returnUrl, HttpContext context) => 
+app.MapGet("/login", async (string? returnUrl, HttpContext context, ISystemRepository repo) => 
 {
+    var clientId = await repo.GetConfigAsync("Google:ClientId");
+    if (string.IsNullOrEmpty(clientId) || clientId == "placeholder")
+    {
+        return Results.Redirect("/setup");
+    }
+
+    var resourceProvider = context.RequestServices.GetRequiredService<IResourceProvider>();
+    var resource = await resourceProvider.GetAsync("login.html");
+    if (resource == null) return Results.NotFound("Login page not found.");
+
+    return Results.Bytes(resource.Data, "text/html");
+});
+
+app.MapGet("/login/challenge/{provider}", (string provider, string? returnUrl) => 
+{
+    var scheme = provider.ToLower() switch
+    {
+        "google" => GoogleDefaults.AuthenticationScheme,
+        _ => null
+    };
+
+    if (scheme == null) return Results.BadRequest("Unsupported provider.");
+
     return Results.Challenge(
         properties: new AuthenticationProperties { RedirectUri = returnUrl ?? "/" },
-        authenticationSchemes: new[] { GoogleDefaults.AuthenticationScheme });
+        authenticationSchemes: new[] { scheme });
+});
+
+app.MapGet("/api/auth/providers", async (ISystemRepository repo) => 
+{
+    var providers = new List<object>();
+    
+    var googleClientId = await repo.GetConfigAsync("Google:ClientId");
+    if (!string.IsNullOrEmpty(googleClientId) && googleClientId != "placeholder")
+    {
+        providers.Add(new { id = "google", name = "Google", icon = "fa-brands fa-google" });
+    }
+
+    return Results.Ok(providers);
+});
+
+app.MapGet("/setup", async (HttpContext context, ISystemRepository repo) => 
+{
+    // Only allow setup if not configured or from localhost
+    var clientId = await repo.GetConfigAsync("Google:ClientId");
+    if (!string.IsNullOrEmpty(clientId) && clientId != "placeholder")
+    {
+         return Results.Redirect("/");
+    }
+
+    var resourceProvider = context.RequestServices.GetRequiredService<IResourceProvider>();
+    var resource = await resourceProvider.GetAsync("setup.html");
+    if (resource == null) return Results.NotFound("Setup page not found.");
+
+    return Results.Bytes(resource.Data, "text/html");
+});
+
+app.MapPost("/api/setup", async (SetupRequest request, ISystemRepository repo) => 
+{
+    await repo.SetConfigAsync("Google:ClientId", request.ClientId);
+    await repo.SetConfigAsync("Google:ClientSecret", request.ClientSecret);
+    return Results.Ok();
 });
 
 app.MapGet("/logout", async (HttpContext context) =>
@@ -95,22 +210,16 @@ app.MapNotesApi();
 app.MapTodoApi();
 
 // Fallback to serve Web UI from ResourceProvider
-// We use a catch-all pattern '{*path}' to ensure assets with extensions (css, js) are captured.
 app.MapFallback("{*path}", async (HttpContext context, IResourceProvider resources) =>
 {
     var path = context.Request.Path.Value?.TrimStart('/') ?? "index.html";
     if (string.IsNullOrEmpty(path)) path = "index.html";
 
-    // Try to find the resource
     var resource = await resources.GetAsync(path);
     
-    // Fallback logic for client-side routing and directories
     if (resource == null)
     {
-        // If it's a request for a file that isn't found, return 404
         if (path.Contains('.')) return Results.NotFound();
-
-        // Otherwise, it might be a client-side route, serves index.html
         path = "index.html";
         resource = await resources.GetAsync(path);
         if (resource == null) return Results.NotFound();
@@ -120,7 +229,6 @@ app.MapFallback("{*path}", async (HttpContext context, IResourceProvider resourc
     return Results.Bytes(resource.Data, contentType);
 });
 
-// Helper for MIME types
 static string GetContentType(string path)
 {
     var ext = Path.GetExtension(path).ToLowerInvariant();
@@ -140,37 +248,7 @@ static string GetContentType(string path)
     };
 }
 
-// Test endpoint for ResourceProvider
-app.MapGet("/test/resource/{*path}", async (string path, IResourceProvider resources) =>
-{
-    var resource = await resources.GetAsync(path);
-    if (resource == null) return Results.NotFound($"Resource '{path}' not found.");
-    
-    // We can directly decode byte[] to string for simple text resources (like templates/scripts)
-    var content = System.Text.Encoding.UTF8.GetString(resource.Data);
-    
-    return Results.Ok(new 
-    { 
-        Path = path, 
-        Source = resource.Source.ToString(), 
-        ContentSnippet = content.Length > 100 ? content[..100] + "..." : content 
-    });
-});
-
-// Test endpoint for Database
-app.MapGet("/test/db/{userId}", (string userId, DatabaseFactory dbFactory) =>
-{
-    try 
-    {
-        using var connection = dbFactory.CreateConnection(userId);
-        return Results.Ok($"Successfully connected to and initialized database for user: {userId}");
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem($"Failed to initialize database: {ex.Message}");
-    }
-});
-
 app.Run();
 
+public record SetupRequest(string ClientId, string ClientSecret);
 public partial class Program { }

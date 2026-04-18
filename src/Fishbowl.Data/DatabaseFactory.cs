@@ -6,20 +6,36 @@ namespace Fishbowl.Data;
 
 public class DatabaseFactory
 {
-    private readonly string _basePath;
+    private readonly string _dataRoot;
+    private readonly string _usersPath;
+    private readonly string _systemDbPath;
 
-    public DatabaseFactory(string basePath = "fishbowl-data/users")
+    public DatabaseFactory(string dataRoot = "fishbowl-data")
     {
-        _basePath = basePath;
-        if (!Directory.Exists(_basePath))
+        // Ensure absolute or relative path is handled correctly
+        _dataRoot = Path.GetFullPath(dataRoot);
+        _usersPath = Path.Combine(_dataRoot, "users");
+        _systemDbPath = Path.Combine(_dataRoot, "system.db");
+
+        if (!Directory.Exists(_usersPath))
         {
-            Directory.CreateDirectory(_basePath);
+            Directory.CreateDirectory(_usersPath);
         }
     }
 
     public IDbConnection CreateConnection(string userId)
     {
-        var dbPath = Path.Combine(_basePath, $"{userId}.db");
+        var dbPath = Path.Combine(_usersPath, $"{userId}.db");
+        return OpenAndInitialize(dbPath, EnsureUserInitialized);
+    }
+
+    public IDbConnection CreateSystemConnection()
+    {
+        return OpenAndInitialize(_systemDbPath, EnsureSystemInitialized);
+    }
+
+    private IDbConnection OpenAndInitialize(string dbPath, Action<IDbConnection> initializer)
+    {
         var connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = dbPath,
@@ -29,33 +45,39 @@ public class DatabaseFactory
         var connection = new SqliteConnection(connectionString);
         connection.Open();
         
-        // Ensure the database is initialized
-        EnsureInitialized(connection);
+        initializer(connection);
         
         return connection;
     }
 
-    private void EnsureInitialized(IDbConnection connection)
+    private void EnsureUserInitialized(IDbConnection connection)
     {
         var version = connection.ExecuteScalar<long>("PRAGMA user_version");
         
-        // Initial Version (0) -> Version 1
         if (version < 1)
         {
-            ApplyInitialSchema(connection);
+            ApplyUserInitialSchema(connection);
             connection.Execute("PRAGMA user_version = 1");
         }
-        
-        // Future migrations would go here:
-        // if (version < 2) { ApplyV2(connection); connection.Execute("PRAGMA user_version = 2"); }
     }
 
-    private void ApplyInitialSchema(IDbConnection connection)
+    private void EnsureSystemInitialized(IDbConnection connection)
+    {
+        var version = connection.ExecuteScalar<long>("PRAGMA user_version");
+        
+        if (version < 1)
+        {
+            ApplySystemInitialSchema(connection);
+            connection.Execute("PRAGMA user_version = 1");
+        }
+    }
+
+    private void ApplyUserInitialSchema(IDbConnection connection)
     {
         using var transaction = connection.BeginTransaction();
         try
         {
-            // Based on concept.md Core Tables
+            // Notes
             connection.Execute(@"
                 CREATE TABLE IF NOT EXISTS notes (
                     id          TEXT PRIMARY KEY,
@@ -71,6 +93,7 @@ public class DatabaseFactory
                     archived    INTEGER DEFAULT 0
                 );", transaction: transaction);
 
+            // Events
             connection.Execute(@"
                 CREATE TABLE IF NOT EXISTS events (
                     id              TEXT PRIMARY KEY,
@@ -89,6 +112,7 @@ public class DatabaseFactory
                     updated_at      TEXT NOT NULL
                 );", transaction: transaction);
 
+            // Sync Sources
             connection.Execute(@"
                 CREATE TABLE IF NOT EXISTS sync_sources (
                     id          TEXT PRIMARY KEY,
@@ -98,6 +122,7 @@ public class DatabaseFactory
                     enabled     INTEGER DEFAULT 1
                 );", transaction: transaction);
 
+            // Reminders
             connection.Execute(@"
                 CREATE TABLE IF NOT EXISTS reminders (
                     id            TEXT PRIMARY KEY,
@@ -108,6 +133,7 @@ public class DatabaseFactory
                     channel_id    TEXT NOT NULL
                 );", transaction: transaction);
 
+            // Todos
             connection.Execute(@"
                 CREATE TABLE IF NOT EXISTS todos (
                     id            TEXT PRIMARY KEY,
@@ -122,12 +148,50 @@ public class DatabaseFactory
                     completed_at  TEXT
                 );", transaction: transaction);
 
+            // FTS
             connection.Execute(@"
-                -- FTS5 virtual table for full-text search
                 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
                     title,
                     content,
                     tags
+                );", transaction: transaction);
+
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    private void ApplySystemInitialSchema(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            connection.Execute(@"
+                CREATE TABLE IF NOT EXISTS users (
+                    id          TEXT PRIMARY KEY,
+                    name        TEXT,
+                    email       TEXT,
+                    avatar_url  TEXT,
+                    created_at  TEXT NOT NULL
+                );", transaction: transaction);
+
+            connection.Execute(@"
+                CREATE TABLE IF NOT EXISTS user_mappings (
+                    provider    TEXT NOT NULL,
+                    provider_id TEXT NOT NULL,
+                    user_id     TEXT NOT NULL REFERENCES users(id),
+                    PRIMARY KEY (provider, provider_id)
+                );", transaction: transaction);
+
+            connection.Execute(@"
+                CREATE TABLE IF NOT EXISTS system_config (
+                    key         TEXT PRIMARY KEY,
+                    value       TEXT,
+                    updated_at  TEXT NOT NULL
                 );", transaction: transaction);
 
             transaction.Commit();

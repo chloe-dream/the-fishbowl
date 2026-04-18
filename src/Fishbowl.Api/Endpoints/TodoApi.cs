@@ -15,14 +15,14 @@ public static class TodoApi
 
         group.MapGet("/", async (ClaimsPrincipal user, ITodoRepository repo, bool includeCompleted = false, CancellationToken ct = default) =>
         {
-            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
             return Results.Ok(await repo.GetAllAsync(userId, includeCompleted, ct));
         });
 
         group.MapGet("/{id}", async (string id, ClaimsPrincipal user, ITodoRepository repo, CancellationToken ct) =>
         {
-            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
             var item = await repo.GetByIdAsync(userId, id, ct);
@@ -31,7 +31,7 @@ public static class TodoApi
 
         group.MapPost("/", async (TodoItem item, ClaimsPrincipal user, ITodoRepository repo, CancellationToken ct) =>
         {
-            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
             var id = await repo.CreateAsync(userId, item, ct);
@@ -40,7 +40,7 @@ public static class TodoApi
 
         group.MapPut("/{id}", async (string id, TodoItem item, ClaimsPrincipal user, ITodoRepository repo, CancellationToken ct) =>
         {
-            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
             item.Id = id;
@@ -50,7 +50,7 @@ public static class TodoApi
 
         group.MapDelete("/{id}", async (string id, ClaimsPrincipal user, ITodoRepository repo, CancellationToken ct) =>
         {
-            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
 
             var deleted = await repo.DeleteAsync(userId, id, ct);

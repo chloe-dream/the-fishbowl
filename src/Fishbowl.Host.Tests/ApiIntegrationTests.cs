@@ -29,7 +29,10 @@ public class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions
             return Task.FromResult(AuthenticateResult.Fail("No User ID provided in test header"));
         }
 
-        var claims = new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) };
+        var claims = new[] { 
+            new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+            new Claim("fishbowl_user_id", userId.ToString()) 
+        };
         var identity = new ClaimsIdentity(claims, AuthenticationScheme);
         var principal = new ClaimsPrincipal(identity);
         var ticket = new AuthenticationTicket(principal, AuthenticationScheme);
