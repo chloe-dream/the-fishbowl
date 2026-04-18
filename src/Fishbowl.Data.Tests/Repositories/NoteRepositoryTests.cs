@@ -148,6 +148,33 @@ public class NoteRepositoryTests : IDisposable
         Assert.Equal(0, hit);
     }
 
+    [Fact]
+    public async Task RoundTrip_AllFields_Test()
+    {
+        var original = new Note
+        {
+            Title = "Full note",
+            Content = "Multiline\n\ncontent.",
+            Type = "journal",
+            Tags = new List<string> { "alpha", "beta", "gamma" },
+            Pinned = true,
+            Archived = false
+        };
+
+        var id = await _repo.CreateAsync(TestUserId, original, TestContext.Current.CancellationToken);
+        var retrieved = await _repo.GetByIdAsync(TestUserId, id, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(retrieved);
+        Assert.Equal(original.Title, retrieved.Title);
+        Assert.Equal(original.Content, retrieved.Content);
+        Assert.Equal(original.Type, retrieved.Type);
+        Assert.Equal(original.Tags, retrieved.Tags);
+        Assert.True(retrieved.Pinned);
+        Assert.False(retrieved.Archived);
+        Assert.Equal(TestUserId, retrieved.CreatedBy);
+        Assert.True(retrieved.CreatedAt > DateTime.UtcNow.AddSeconds(-10));
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

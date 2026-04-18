@@ -1,5 +1,4 @@
 using System.Data;
-using System.Text.Json;
 using Dapper;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
@@ -18,20 +17,15 @@ public class NoteRepository : INoteRepository
     public async Task<Note?> GetByIdAsync(string userId, string id, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateConnection(userId);
-        var row = await db.QuerySingleOrDefaultAsync<dynamic>(
+        return await db.QuerySingleOrDefaultAsync<Note>(
             new CommandDefinition("SELECT * FROM notes WHERE id = @id", new { id }, cancellationToken: ct));
-
-        if (row == null) return null;
-
-        return MapRowToNote(row);
     }
 
     public async Task<IEnumerable<Note>> GetAllAsync(string userId, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateConnection(userId);
-        var rows = await db.QueryAsync<dynamic>(
+        return await db.QueryAsync<Note>(
             new CommandDefinition("SELECT * FROM notes ORDER BY updated_at DESC", cancellationToken: ct));
-        return rows.Select(MapRowToNote);
     }
 
     public async Task<string> CreateAsync(string userId, Note note, CancellationToken ct = default)
@@ -49,7 +43,7 @@ public class NoteRepository : INoteRepository
         {
             await db.ExecuteAsync(new CommandDefinition(@"
                 INSERT INTO notes (id, title, content, content_secret, type, tags, created_by, created_at, updated_at, pinned, archived)
-                VALUES (@Id, @Title, @Content, @ContentSecret, @Type, @TagsJson, @CreatedBy, @CreatedAt, @UpdatedAt, @Pinned, @Archived)",
+                VALUES (@Id, @Title, @Content, @ContentSecret, @Type, @Tags, @CreatedBy, @CreatedAt, @UpdatedAt, @Pinned, @Archived)",
                 new
                 {
                     note.Id,
@@ -57,7 +51,7 @@ public class NoteRepository : INoteRepository
                     note.Content,
                     note.ContentSecret,
                     note.Type,
-                    TagsJson = JsonSerializer.Serialize(note.Tags),
+                    note.Tags,
                     note.CreatedBy,
                     CreatedAt = note.CreatedAt.ToString("o"),
                     UpdatedAt = note.UpdatedAt.ToString("o"),
@@ -96,7 +90,7 @@ public class NoteRepository : INoteRepository
             var affected = await db.ExecuteAsync(new CommandDefinition(@"
                 UPDATE notes
                 SET title = @Title, content = @Content, content_secret = @ContentSecret,
-                    type = @Type, tags = @TagsJson, updated_at = @UpdatedAt,
+                    type = @Type, tags = @Tags, updated_at = @UpdatedAt,
                     pinned = @Pinned, archived = @Archived
                 WHERE id = @Id",
                 new
@@ -105,7 +99,7 @@ public class NoteRepository : INoteRepository
                     note.Content,
                     note.ContentSecret,
                     note.Type,
-                    TagsJson = JsonSerializer.Serialize(note.Tags),
+                    note.Tags,
                     UpdatedAt = note.UpdatedAt.ToString("o"),
                     Pinned = note.Pinned ? 1 : 0,
                     Archived = note.Archived ? 1 : 0,
@@ -159,21 +153,4 @@ public class NoteRepository : INoteRepository
         }
     }
 
-    private Note MapRowToNote(dynamic row)
-    {
-        return new Note
-        {
-            Id = row.id,
-            Title = row.title,
-            Content = row.content,
-            ContentSecret = row.content_secret,
-            Type = row.type,
-            Tags = string.IsNullOrEmpty(row.tags) ? new List<string>() : JsonSerializer.Deserialize<List<string>>((string)row.tags) ?? new List<string>(),
-            CreatedBy = row.created_by,
-            CreatedAt = DateTime.Parse(row.created_at),
-            UpdatedAt = DateTime.Parse(row.updated_at),
-            Pinned = row.pinned == 1,
-            Archived = row.archived == 1
-        };
-    }
 }

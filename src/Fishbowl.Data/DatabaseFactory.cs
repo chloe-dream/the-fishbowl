@@ -10,6 +10,11 @@ public class DatabaseFactory
     private readonly string _usersPath;
     private readonly string _systemDbPath;
 
+    static DatabaseFactory()
+    {
+        Fishbowl.Data.Dapper.DapperConventions.Install();
+    }
+
     public DatabaseFactory(string dataRoot = "fishbowl-data")
     {
         // Ensure absolute or relative path is handled correctly

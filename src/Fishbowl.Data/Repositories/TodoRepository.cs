@@ -17,12 +17,8 @@ public class TodoRepository : ITodoRepository
     public async Task<TodoItem?> GetByIdAsync(string userId, string id, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateConnection(userId);
-        var row = await db.QuerySingleOrDefaultAsync<dynamic>(
+        return await db.QuerySingleOrDefaultAsync<TodoItem>(
             new CommandDefinition("SELECT * FROM todos WHERE id = @id", new { id }, cancellationToken: ct));
-
-        if (row == null) return null;
-
-        return MapRowToTodo(row);
     }
 
     public async Task<IEnumerable<TodoItem>> GetAllAsync(string userId, bool includeCompleted = false, CancellationToken ct = default)
@@ -35,8 +31,7 @@ public class TodoRepository : ITodoRepository
         }
         sql += " ORDER BY created_at DESC";
 
-        var rows = await db.QueryAsync<dynamic>(new CommandDefinition(sql, cancellationToken: ct));
-        return rows.Select(MapRowToTodo);
+        return await db.QueryAsync<TodoItem>(new CommandDefinition(sql, cancellationToken: ct));
     }
 
     public async Task<string> CreateAsync(string userId, TodoItem item, CancellationToken ct = default)
@@ -108,20 +103,4 @@ public class TodoRepository : ITodoRepository
         return affected > 0;
     }
 
-    private TodoItem MapRowToTodo(dynamic row)
-    {
-        return new TodoItem
-        {
-            Id = row.id,
-            Title = row.title,
-            Description = row.description,
-            DueAt = row.due_at != null ? DateTime.Parse(row.due_at) : null,
-            ReminderAt = row.reminder_at != null ? DateTime.Parse(row.reminder_at) : null,
-            Source = row.source,
-            CreatedBy = row.created_by,
-            CreatedAt = DateTime.Parse(row.created_at),
-            UpdatedAt = DateTime.Parse(row.updated_at),
-            CompletedAt = row.completed_at != null ? DateTime.Parse(row.completed_at) : null
-        };
-    }
 }
