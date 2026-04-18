@@ -20,13 +20,10 @@ public class ResourceProvider : IResourceProvider
     public async Task<Resource?> GetAsync(string path, CancellationToken ct = default)
     {
         if (_cache.TryGetValue(path, out Resource? cached))
-        {
             return cached;
-        }
 
         Resource? resource = null;
 
-        // 1. Check Disk (Mods)
         var diskPath = Path.Combine(_modsPath, path);
         if (File.Exists(diskPath))
         {
@@ -34,73 +31,49 @@ public class ResourceProvider : IResourceProvider
             resource = new Resource(data, path, ResourceSource.Disk);
         }
 
-        // 2. Check Database (TODO: Implement when DB service is ready)
         if (resource == null)
         {
-            // var dbResource = await _db.GetResourceAsync(path);
-            // if (dbResource != null) resource = dbResource;
-        }
-
-        // 3. Check Embedded
-        if (resource == null)
-        {
-            var normalizedPath = path.Replace('\\', '/');
-            
-            // Try direct path matches
-            // 1. As-is
-            var stream = _embeddedAssembly.GetManifestResourceStream(normalizedPath);
-            
-            // 2. With backslashes (Common on Windows MSBuild with LogicalName / RecursiveDir)
-            if (stream == null)
-            {
-                var windowsPath = normalizedPath.Replace('/', '\\');
-                stream = _embeddedAssembly.GetManifestResourceStream(windowsPath);
-            }
-            
-            // 3. Legacy dot-notation fallback
-            if (stream == null)
-            {
-                var dotPath = normalizedPath.Replace('/', '.');
-                var legacyName = $"{_embeddedAssembly.GetName().Name}.Resources.{dotPath}";
-                stream = _embeddedAssembly.GetManifestResourceStream(legacyName);
-            }
-            
+            using var stream = TryOpenEmbeddedStream(path);
             if (stream != null)
             {
-                using (stream)
-                using (var ms = new MemoryStream())
-                {
-                    await stream.CopyToAsync(ms, ct);
-                    resource = new Resource(ms.ToArray(), path, ResourceSource.Embedded);
-                }
+                using var ms = new MemoryStream();
+                await stream.CopyToAsync(ms, ct);
+                resource = new Resource(ms.ToArray(), path, ResourceSource.Embedded);
             }
         }
 
         if (resource != null)
-        {
             _cache.Set(path, resource);
-        }
 
         return resource;
     }
 
-    public async Task<bool> ExistsAsync(string path, CancellationToken ct = default)
+    public Task<bool> ExistsAsync(string path, CancellationToken ct = default)
     {
-        if (_cache.TryGetValue(path, out _)) return true;
+        if (_cache.TryGetValue(path, out _))
+            return Task.FromResult(true);
 
         var diskPath = Path.Combine(_modsPath, path);
-        if (File.Exists(diskPath)) return true;
+        if (File.Exists(diskPath))
+            return Task.FromResult(true);
 
-        var embeddedPath = path.Replace('/', '.').Replace('\\', '.');
-        var resourceName = $"{_embeddedAssembly.GetName().Name}.Resources.{embeddedPath}";
-        var manifestNames = _embeddedAssembly.GetManifestResourceNames();
-        
-        foreach (var name in manifestNames)
-        {
-            if (name.Equals(resourceName, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
+        using var stream = TryOpenEmbeddedStream(path);
+        return Task.FromResult(stream != null);
+    }
 
-        return false;
+    private Stream? TryOpenEmbeddedStream(string path)
+    {
+        var normalizedPath = path.Replace('\\', '/');
+
+        var stream = _embeddedAssembly.GetManifestResourceStream(normalizedPath);
+        if (stream != null) return stream;
+
+        var windowsPath = normalizedPath.Replace('/', '\\');
+        stream = _embeddedAssembly.GetManifestResourceStream(windowsPath);
+        if (stream != null) return stream;
+
+        var dotPath = normalizedPath.Replace('/', '.');
+        var legacyName = $"{_embeddedAssembly.GetName().Name}.Resources.{dotPath}";
+        return _embeddedAssembly.GetManifestResourceStream(legacyName);
     }
 }

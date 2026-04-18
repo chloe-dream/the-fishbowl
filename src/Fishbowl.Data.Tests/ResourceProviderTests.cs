@@ -146,7 +146,7 @@ public class ResourceProviderTests : IDisposable
         // Arrange
         var provider = new ResourceProvider(
             cache: _cache,
-            modsPath: _tempModsDir, 
+            modsPath: _tempModsDir,
             embeddedAssembly: typeof(ResourceProvider).Assembly
         );
 
@@ -157,6 +157,32 @@ public class ResourceProviderTests : IDisposable
         // Assert
         Assert.NotNull(resource);
         Assert.Equal(ResourceSource.Embedded, resource.Source);
+    }
+
+    [Fact]
+    public async Task ExistsAsync_FindsEmbeddedResourceByForwardSlashSubPath_Test()
+    {
+        var provider = new ResourceProvider(
+            cache: _cache,
+            modsPath: _tempModsDir,
+            embeddedAssembly: typeof(ResourceProvider).Assembly);
+
+        var exists = await provider.ExistsAsync("css/index.css", TestContext.Current.CancellationToken);
+
+        Assert.True(exists, "ExistsAsync must find embedded subfolder resources (forward slash).");
+    }
+
+    [Fact]
+    public async Task ExistsAsync_FindsEmbeddedResourceByBackslashSubPath_Test()
+    {
+        var provider = new ResourceProvider(
+            cache: _cache,
+            modsPath: _tempModsDir,
+            embeddedAssembly: typeof(ResourceProvider).Assembly);
+
+        var exists = await provider.ExistsAsync(@"css\index.css", TestContext.Current.CancellationToken);
+
+        Assert.True(exists, "ExistsAsync must find embedded subfolder resources (backslash).");
     }
 
     public void Dispose()
