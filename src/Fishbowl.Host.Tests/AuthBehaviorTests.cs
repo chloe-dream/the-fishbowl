@@ -82,6 +82,10 @@ public class AuthBehaviorTests : IClassFixture<WebApplicationFactory<Program>>, 
             var repo = scope.ServiceProvider.GetRequiredService<Fishbowl.Core.Repositories.ISystemRepository>();
             await repo.SetConfigAsync("Google:ClientId", "test-client-id.apps.googleusercontent.com", TestContext.Current.CancellationToken);
             await repo.SetConfigAsync("Google:ClientSecret", "test-secret-value", TestContext.Current.CancellationToken);
+
+            var cache = scope.ServiceProvider.GetRequiredService<Fishbowl.Host.Configuration.ConfigurationCache>();
+            cache.Set("Google:ClientId", "test-client-id.apps.googleusercontent.com");
+            cache.Set("Google:ClientSecret", "test-secret-value");
         }
 
         var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
@@ -108,6 +112,10 @@ public class AuthBehaviorTests : IClassFixture<WebApplicationFactory<Program>>, 
             var repo = scope.ServiceProvider.GetRequiredService<Fishbowl.Core.Repositories.ISystemRepository>();
             await repo.SetConfigAsync("Google:ClientId", "seeded-test.apps.googleusercontent.com", TestContext.Current.CancellationToken);
             await repo.SetConfigAsync("Google:ClientSecret", "seeded-test-secret-value-long-enough", TestContext.Current.CancellationToken);
+
+            var cache = scope.ServiceProvider.GetRequiredService<Fishbowl.Host.Configuration.ConfigurationCache>();
+            cache.Set("Google:ClientId", "seeded-test.apps.googleusercontent.com");
+            cache.Set("Google:ClientSecret", "seeded-test-secret-value-long-enough");
         }
 
         var client = _factory.CreateClient(new WebApplicationFactoryClientOptions

@@ -106,18 +106,19 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-// Delay Google Configuration until ISystemRepository is available.
-// When unconfigured, options get the sentinel "placeholder" (see inner comment).
+// Configuration snapshot populated before the server starts listening
+builder.Services.AddSingleton<Fishbowl.Host.Configuration.ConfigurationCache>();
+builder.Services.AddHostedService<Fishbowl.Host.Configuration.ConfigurationInitializer>();
+
+// Google OAuth options bind from the cache (populated by the hosted service).
+// Auth middleware resolves via IOptionsMonitor<GoogleOptions> which re-runs this
+// callback per-request, so /api/setup updates are observed without a restart.
+// "placeholder" keeps GoogleOptions validation happy (non-empty) when unconfigured.
 builder.Services.AddOptions<GoogleOptions>(GoogleDefaults.AuthenticationScheme)
-    .Configure<ISystemRepository>((options, repo) =>
+    .Configure<Fishbowl.Host.Configuration.ConfigurationCache>((options, cache) =>
     {
-        var clientId = repo.GetConfigAsync("Google:ClientId").GetAwaiter().GetResult();
-        var clientSecret = repo.GetConfigAsync("Google:ClientSecret").GetAwaiter().GetResult();
-        // "placeholder" keeps GoogleOptions validation happy (non-empty) without being
-        // a usable credential. /login checks for "placeholder" explicitly and redirects
-        // to /setup. See docs/superpowers/specs/2026-04-18-a-plus-hardening-design.md §1.2.
-        options.ClientId = clientId ?? "placeholder";
-        options.ClientSecret = clientSecret ?? "placeholder";
+        options.ClientId = cache.Get("Google:ClientId") ?? "placeholder";
+        options.ClientSecret = cache.Get("Google:ClientSecret") ?? "placeholder";
     });
 
 builder.Services.AddAuthorization();
@@ -144,9 +145,9 @@ if (!app.Environment.IsEnvironment("Testing"))
 }
 
 // Register Auth Endpoints
-app.MapGet("/login", async (string? returnUrl, HttpContext context, ISystemRepository repo) =>
+app.MapGet("/login", async (string? returnUrl, HttpContext context, Fishbowl.Host.Configuration.ConfigurationCache cache) =>
 {
-    var clientId = await repo.GetConfigAsync("Google:ClientId");
+    var clientId = cache.Get("Google:ClientId");
     if (string.IsNullOrEmpty(clientId) || clientId == "placeholder")
     {
         return Results.Redirect("/setup");
@@ -174,11 +175,11 @@ app.MapGet("/login/challenge/{provider}", (string provider, string? returnUrl) =
         authenticationSchemes: new[] { scheme });
 });
 
-app.MapGet("/api/auth/providers", async (ISystemRepository repo) =>
+app.MapGet("/api/auth/providers", (Fishbowl.Host.Configuration.ConfigurationCache cache) =>
 {
     var providers = new List<object>();
 
-    var googleClientId = await repo.GetConfigAsync("Google:ClientId");
+    var googleClientId = cache.Get("Google:ClientId");
     if (!string.IsNullOrEmpty(googleClientId) && googleClientId != "placeholder")
     {
         providers.Add(new { id = "google", name = "Google", icon = "fa-brands fa-google" });
@@ -187,10 +188,10 @@ app.MapGet("/api/auth/providers", async (ISystemRepository repo) =>
     return Results.Ok(providers);
 });
 
-app.MapGet("/setup", async (HttpContext context, ISystemRepository repo) =>
+app.MapGet("/setup", async (HttpContext context, Fishbowl.Host.Configuration.ConfigurationCache cache) =>
 {
     // Only allow setup if not configured or from localhost
-    var clientId = await repo.GetConfigAsync("Google:ClientId");
+    var clientId = cache.Get("Google:ClientId");
     if (!string.IsNullOrEmpty(clientId) && clientId != "placeholder")
     {
         return Results.Redirect("/");
@@ -203,10 +204,12 @@ app.MapGet("/setup", async (HttpContext context, ISystemRepository repo) =>
     return Results.Bytes(resource.Data, "text/html");
 });
 
-app.MapPost("/api/setup", async (SetupRequest request, ISystemRepository repo) =>
+app.MapPost("/api/setup", async (SetupRequest request, ISystemRepository repo, Fishbowl.Host.Configuration.ConfigurationCache cache) =>
 {
     await repo.SetConfigAsync("Google:ClientId", request.ClientId);
     await repo.SetConfigAsync("Google:ClientSecret", request.ClientSecret);
+    cache.Set("Google:ClientId", request.ClientId);
+    cache.Set("Google:ClientSecret", request.ClientSecret);
     return Results.Ok();
 });
 
