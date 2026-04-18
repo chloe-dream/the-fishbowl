@@ -18,7 +18,11 @@ public static class TodoApi
             var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
             return Results.Ok(await repo.GetAllAsync(userId, includeCompleted, ct));
-        });
+        })
+        .WithName("ListTodos")
+        .WithSummary("Lists all todos for the authenticated user.")
+        .Produces<IEnumerable<TodoItem>>()
+        .Produces(StatusCodes.Status401Unauthorized);
 
         group.MapGet("/{id}", async (string id, ClaimsPrincipal user, ITodoRepository repo, CancellationToken ct) =>
         {
@@ -27,7 +31,12 @@ public static class TodoApi
 
             var item = await repo.GetByIdAsync(userId, id, ct);
             return item != null ? Results.Ok(item) : Results.NotFound();
-        });
+        })
+        .WithName("GetTodo")
+        .WithSummary("Gets a single todo by id.")
+        .Produces<TodoItem>()
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized);
 
         group.MapPost("/", async (TodoItem item, ClaimsPrincipal user, ITodoRepository repo, CancellationToken ct) =>
         {
@@ -36,7 +45,11 @@ public static class TodoApi
 
             var id = await repo.CreateAsync(userId, item, ct);
             return Results.Created($"/api/v1/todos/{id}", item);
-        });
+        })
+        .WithName("CreateTodo")
+        .WithSummary("Creates a new todo.")
+        .Produces<TodoItem>(StatusCodes.Status201Created)
+        .Produces(StatusCodes.Status401Unauthorized);
 
         group.MapPut("/{id}", async (string id, TodoItem item, ClaimsPrincipal user, ITodoRepository repo, CancellationToken ct) =>
         {
@@ -46,7 +59,12 @@ public static class TodoApi
             item.Id = id;
             var updated = await repo.UpdateAsync(userId, item, ct);
             return updated ? Results.NoContent() : Results.NotFound();
-        });
+        })
+        .WithName("UpdateTodo")
+        .WithSummary("Updates an existing todo.")
+        .Produces(StatusCodes.Status204NoContent)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized);
 
         group.MapDelete("/{id}", async (string id, ClaimsPrincipal user, ITodoRepository repo, CancellationToken ct) =>
         {
@@ -55,7 +73,12 @@ public static class TodoApi
 
             var deleted = await repo.DeleteAsync(userId, id, ct);
             return deleted ? Results.NoContent() : Results.NotFound();
-        });
+        })
+        .WithName("DeleteTodo")
+        .WithSummary("Deletes a todo.")
+        .Produces(StatusCodes.Status204NoContent)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized);
 
         return group.RequireAuthorization();
     }

@@ -105,6 +105,7 @@ builder.Services.AddOptions<GoogleOptions>(GoogleDefaults.AuthenticationScheme)
     });
 
 builder.Services.AddAuthorization();
+builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
@@ -117,6 +118,8 @@ app.UseHttpsRedirection();
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+app.MapOpenApi("/api/openapi.json");
 
 // Branding Output
 if (!app.Environment.IsEnvironment("Testing"))
