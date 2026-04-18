@@ -39,6 +39,45 @@ public class DatabaseFactory
         return OpenAndInitialize(_systemDbPath, EnsureSystemInitialized);
     }
 
+    public async Task WithUserTransactionAsync(
+        string userId,
+        Func<IDbConnection, IDbTransaction, CancellationToken, Task> work,
+        CancellationToken ct = default)
+    {
+        using var db = CreateConnection(userId);
+        using var tx = db.BeginTransaction();
+        try
+        {
+            await work(db, tx, ct);
+            tx.Commit();
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
+    }
+
+    public async Task<T> WithUserTransactionAsync<T>(
+        string userId,
+        Func<IDbConnection, IDbTransaction, CancellationToken, Task<T>> work,
+        CancellationToken ct = default)
+    {
+        using var db = CreateConnection(userId);
+        using var tx = db.BeginTransaction();
+        try
+        {
+            var result = await work(db, tx, ct);
+            tx.Commit();
+            return result;
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
+    }
+
     private IDbConnection OpenAndInitialize(string dbPath, Action<IDbConnection> initializer)
     {
         var connectionString = new SqliteConnectionStringBuilder

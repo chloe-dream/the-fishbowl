@@ -37,55 +37,36 @@ public class NoteRepository : INoteRepository
         note.UpdatedAt = note.CreatedAt;
         note.CreatedBy = userId;
 
-        using var db = _dbFactory.CreateConnection(userId);
-        using var tx = db.BeginTransaction();
-        try
+        await _dbFactory.WithUserTransactionAsync(userId, async (db, tx, token) =>
         {
             await db.ExecuteAsync(new CommandDefinition(@"
                 INSERT INTO notes (id, title, content, content_secret, type, tags, created_by, created_at, updated_at, pinned, archived)
                 VALUES (@Id, @Title, @Content, @ContentSecret, @Type, @Tags, @CreatedBy, @CreatedAt, @UpdatedAt, @Pinned, @Archived)",
-                new
-                {
-                    note.Id,
-                    note.Title,
-                    note.Content,
-                    note.ContentSecret,
-                    note.Type,
-                    note.Tags,
-                    note.CreatedBy,
+                new {
+                    note.Id, note.Title, note.Content, note.ContentSecret, note.Type,
+                    note.Tags, note.CreatedBy,
                     CreatedAt = note.CreatedAt.ToString("o"),
                     UpdatedAt = note.UpdatedAt.ToString("o"),
                     Pinned = note.Pinned ? 1 : 0,
                     Archived = note.Archived ? 1 : 0
-                }, transaction: tx, cancellationToken: ct));
+                }, transaction: tx, cancellationToken: token));
 
             await db.ExecuteAsync(new CommandDefinition(
                 "INSERT INTO notes_fts (rowid, title, content, tags) VALUES ((SELECT rowid FROM notes WHERE id = @Id), @Title, @Content, @TagsFlat)",
-                new
-                {
-                    note.Id,
-                    note.Title,
-                    note.Content,
+                new {
+                    note.Id, note.Title, note.Content,
                     TagsFlat = string.Join(' ', note.Tags)
-                }, transaction: tx, cancellationToken: ct));
+                }, transaction: tx, cancellationToken: token));
+        }, ct);
 
-            tx.Commit();
-            return note.Id;
-        }
-        catch
-        {
-            tx.Rollback();
-            throw;
-        }
+        return note.Id;
     }
 
     public async Task<bool> UpdateAsync(string userId, Note note, CancellationToken ct = default)
     {
         note.UpdatedAt = DateTime.UtcNow;
 
-        using var db = _dbFactory.CreateConnection(userId);
-        using var tx = db.BeginTransaction();
-        try
+        return await _dbFactory.WithUserTransactionAsync<bool>(userId, async (db, tx, token) =>
         {
             var affected = await db.ExecuteAsync(new CommandDefinition(@"
                 UPDATE notes
@@ -93,64 +74,43 @@ public class NoteRepository : INoteRepository
                     type = @Type, tags = @Tags, updated_at = @UpdatedAt,
                     pinned = @Pinned, archived = @Archived
                 WHERE id = @Id",
-                new
-                {
-                    note.Title,
-                    note.Content,
-                    note.ContentSecret,
-                    note.Type,
+                new {
+                    note.Title, note.Content, note.ContentSecret, note.Type,
                     note.Tags,
                     UpdatedAt = note.UpdatedAt.ToString("o"),
                     Pinned = note.Pinned ? 1 : 0,
                     Archived = note.Archived ? 1 : 0,
                     note.Id
-                }, transaction: tx, cancellationToken: ct));
+                }, transaction: tx, cancellationToken: token));
 
             if (affected > 0)
             {
                 await db.ExecuteAsync(new CommandDefinition(
                     "UPDATE notes_fts SET title = @Title, content = @Content, tags = @TagsFlat WHERE rowid = (SELECT rowid FROM notes WHERE id = @Id)",
-                    new
-                    {
-                        note.Id,
-                        note.Title,
-                        note.Content,
+                    new {
+                        note.Id, note.Title, note.Content,
                         TagsFlat = string.Join(' ', note.Tags)
-                    }, transaction: tx, cancellationToken: ct));
+                    }, transaction: tx, cancellationToken: token));
             }
 
-            tx.Commit();
             return affected > 0;
-        }
-        catch
-        {
-            tx.Rollback();
-            throw;
-        }
+        }, ct);
     }
 
     public async Task<bool> DeleteAsync(string userId, string id, CancellationToken ct = default)
     {
-        using var db = _dbFactory.CreateConnection(userId);
-        using var tx = db.BeginTransaction();
-        try
+        return await _dbFactory.WithUserTransactionAsync<bool>(userId, async (db, tx, token) =>
         {
             await db.ExecuteAsync(new CommandDefinition(
                 "DELETE FROM notes_fts WHERE rowid = (SELECT rowid FROM notes WHERE id = @id)",
-                new { id }, transaction: tx, cancellationToken: ct));
+                new { id }, transaction: tx, cancellationToken: token));
 
             var affected = await db.ExecuteAsync(new CommandDefinition(
                 "DELETE FROM notes WHERE id = @id",
-                new { id }, transaction: tx, cancellationToken: ct));
+                new { id }, transaction: tx, cancellationToken: token));
 
-            tx.Commit();
             return affected > 0;
-        }
-        catch
-        {
-            tx.Rollback();
-            throw;
-        }
+        }, ct);
     }
 
 }

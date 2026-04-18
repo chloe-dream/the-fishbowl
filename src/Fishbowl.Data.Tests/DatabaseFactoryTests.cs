@@ -90,6 +90,42 @@ public class DatabaseFactoryTests : IDisposable
         Assert.Equal(1, version);
     }
 
+    [Fact]
+    public async Task WithUserTransaction_RollsBackOnException_Test()
+    {
+        var factory = new DatabaseFactory(_tempDbDir);
+        const string userId = "tx_user";
+
+        // Pre-create the DB and a sentinel row
+        using (var conn = factory.CreateConnection(userId))
+        {
+            await conn.ExecuteAsync(
+                "INSERT INTO notes (id, title, created_by, created_at, updated_at) VALUES ('sentinel', 'sentinel', @u, @t, @t)",
+                new { u = userId, t = DateTime.UtcNow.ToString("o") });
+        }
+
+        // Act — throw inside the transaction after an insert
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await factory.WithUserTransactionAsync(userId, async (db, tx, ct) =>
+            {
+                await db.ExecuteAsync(
+                    new CommandDefinition(
+                        "INSERT INTO notes (id, title, created_by, created_at, updated_at) VALUES ('rollback-me', 't', @u, @t, @t)",
+                        new { u = userId, t = DateTime.UtcNow.ToString("o") },
+                        transaction: tx, cancellationToken: ct));
+                throw new InvalidOperationException("boom");
+            }, TestContext.Current.CancellationToken);
+        });
+
+        // Assert — only the sentinel survives
+        using (var conn = factory.CreateConnection(userId))
+        {
+            var count = await conn.ExecuteScalarAsync<long>("SELECT count(*) FROM notes");
+            Assert.Equal(1, count);
+        }
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();
