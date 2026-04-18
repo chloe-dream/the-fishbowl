@@ -190,26 +190,43 @@ app.MapGet("/api/auth/providers", (Fishbowl.Host.Configuration.ConfigurationCach
 
 app.MapGet("/setup", async (HttpContext context, Fishbowl.Host.Configuration.ConfigurationCache cache) =>
 {
-    // Only allow setup if not configured or from localhost
     var clientId = cache.Get("Google:ClientId");
     if (!string.IsNullOrEmpty(clientId) && clientId != "placeholder")
-    {
-        return Results.Redirect("/");
-    }
+        return Results.NotFound();
 
-    var resourceProvider = context.RequestServices.GetRequiredService<IResourceProvider>();
-    var resource = await resourceProvider.GetAsync("setup.html");
-    if (resource == null) return Results.NotFound("Setup page not found.");
-
-    return Results.Bytes(resource.Data, "text/html");
+    var resources = context.RequestServices.GetRequiredService<IResourceProvider>();
+    var resource = await resources.GetAsync("setup.html");
+    return resource != null
+        ? Results.Bytes(resource.Data, "text/html")
+        : Results.NotFound("Setup page not found.");
 });
 
-app.MapPost("/api/setup", async (SetupRequest request, ISystemRepository repo, Fishbowl.Host.Configuration.ConfigurationCache cache) =>
+app.MapPost("/api/setup", async (
+    SetupRequest request,
+    ISystemRepository repo,
+    Fishbowl.Host.Configuration.ConfigurationCache cache) =>
 {
+    // Lockout: if already configured, 404 (not 302 — harder to bypass)
+    var existingId = cache.Get("Google:ClientId");
+    if (!string.IsNullOrEmpty(existingId) && existingId != "placeholder")
+        return Results.NotFound();
+
+    // Validation
+    if (string.IsNullOrWhiteSpace(request.ClientId)
+        || !request.ClientId.EndsWith(".apps.googleusercontent.com", StringComparison.Ordinal))
+    {
+        return Results.BadRequest(new { error = "ClientId must be a Google OAuth client ID ending in .apps.googleusercontent.com" });
+    }
+    if (string.IsNullOrWhiteSpace(request.ClientSecret) || request.ClientSecret.Length < 20)
+    {
+        return Results.BadRequest(new { error = "ClientSecret must be at least 20 characters." });
+    }
+
     await repo.SetConfigAsync("Google:ClientId", request.ClientId);
     await repo.SetConfigAsync("Google:ClientSecret", request.ClientSecret);
     cache.Set("Google:ClientId", request.ClientId);
     cache.Set("Google:ClientSecret", request.ClientSecret);
+
     return Results.Ok();
 });
 
