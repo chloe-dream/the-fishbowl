@@ -90,24 +90,13 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-// Delay Google Configuration until ISystemRepository is available
+// Delay Google Configuration until ISystemRepository is available.
+// Empty creds are valid — /login redirects to /setup when ClientId is unconfigured.
 builder.Services.AddOptions<GoogleOptions>(GoogleDefaults.AuthenticationScheme)
-    .Configure<ISystemRepository, IWebHostEnvironment>((options, repo, env) => 
+    .Configure<ISystemRepository>((options, repo) =>
     {
         var clientId = repo.GetConfigAsync("Google:ClientId").GetAwaiter().GetResult();
         var clientSecret = repo.GetConfigAsync("Google:ClientSecret").GetAwaiter().GetResult();
-
-        // Localhost Auto-Seeding
-        if (string.IsNullOrEmpty(clientId) && (env.IsDevelopment() || env.IsEnvironment("Localhost")))
-        {
-            // Fallback to development credentials for localhost
-            clientId = "1049281787342-9vrtp7kqv55ge6l5l1iaa62t1q7v1b1r.apps.googleusercontent.com";
-            clientSecret = "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b5"; // Note: These should be real dev ones if provided, or placeholders
-            
-            repo.SetConfigAsync("Google:ClientId", clientId).GetAwaiter().GetResult();
-            repo.SetConfigAsync("Google:ClientSecret", clientSecret).GetAwaiter().GetResult();
-        }
-
         options.ClientId = clientId ?? "placeholder";
         options.ClientSecret = clientSecret ?? "placeholder";
     });

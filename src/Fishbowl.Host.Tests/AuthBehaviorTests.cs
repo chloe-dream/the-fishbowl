@@ -1,6 +1,8 @@
 using System.Net;
+using Fishbowl.Data;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Fishbowl.Host.Tests;
@@ -8,12 +10,23 @@ namespace Fishbowl.Host.Tests;
 public class AuthBehaviorTests : IClassFixture<WebApplicationFactory<Program>>
 {
     private readonly WebApplicationFactory<Program> _factory;
+    private readonly string _testDataDir;
 
     public AuthBehaviorTests(WebApplicationFactory<Program> factory)
     {
+        _testDataDir = Path.Combine(Path.GetTempPath(), "fishbowl_auth_tests_" + Path.GetRandomFileName());
+        Directory.CreateDirectory(_testDataDir);
+
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
+            builder.ConfigureServices(services =>
+            {
+                // Replace DatabaseFactory with test instance
+                var dbDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(DatabaseFactory));
+                if (dbDescriptor != null) services.Remove(dbDescriptor);
+                services.AddSingleton<DatabaseFactory>(new DatabaseFactory(_testDataDir));
+            });
         });
     }
 
@@ -38,14 +51,35 @@ public class AuthBehaviorTests : IClassFixture<WebApplicationFactory<Program>>
     }
 
     [Fact]
-    public async Task GetLogin_ReturnsOk_Page_Test()
+    public async Task GetLogin_RedirectsToSetup_WhenUnconfigured_Test()
     {
-        // Arrange
         var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false
         });
-        
+
+        var response = await client.GetAsync("/login", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal("/setup", response.Headers.Location?.ToString());
+    }
+
+    [Fact]
+    public async Task GetLogin_ReturnsOk_Page_Test()
+    {
+        // Arrange — seed Google config so /login serves the login page
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var repo = scope.ServiceProvider.GetRequiredService<Fishbowl.Core.Repositories.ISystemRepository>();
+            await repo.SetConfigAsync("Google:ClientId", "test-client-id.apps.googleusercontent.com", TestContext.Current.CancellationToken);
+            await repo.SetConfigAsync("Google:ClientSecret", "test-secret-value", TestContext.Current.CancellationToken);
+        }
+
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
         // Act
         var response = await client.GetAsync("/login", TestContext.Current.CancellationToken);
 
@@ -59,20 +93,25 @@ public class AuthBehaviorTests : IClassFixture<WebApplicationFactory<Program>>
     [Fact]
     public async Task GetLoginChallenge_RedirectsToGoogle_Test()
     {
-        // Arrange
+        // Arrange — seed Google config into system.db via the test host
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var repo = scope.ServiceProvider.GetRequiredService<Fishbowl.Core.Repositories.ISystemRepository>();
+            await repo.SetConfigAsync("Google:ClientId", "seeded-test.apps.googleusercontent.com", TestContext.Current.CancellationToken);
+            await repo.SetConfigAsync("Google:ClientSecret", "seeded-test-secret-value-long-enough", TestContext.Current.CancellationToken);
+        }
+
         var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false
         });
 
-        // Act
         var response = await client.GetAsync("/login/challenge/google", TestContext.Current.CancellationToken);
 
-        // Assert
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         var location = response.Headers.Location?.ToString();
         Assert.Contains("accounts.google.com", location);
-        Assert.Contains("client_id=1049281787342", location); // Check for start of our seeded dev client id
+        Assert.Contains("client_id=seeded-test", location);
     }
 
     [Fact]
