@@ -5,6 +5,7 @@ using Fishbowl.Data.Repositories;
 using Microsoft.Data.Sqlite;
 using System.IO;
 using System.Threading.Tasks;
+using Dapper;
 
 namespace Fishbowl.Tests.Repositories;
 
@@ -97,6 +98,54 @@ public class NoteRepositoryTests : IDisposable
 
         // Assert
         Assert.Equal(2, notes.Count());
+    }
+
+    [Fact]
+    public async Task Create_PopulatesFts_Test()
+    {
+        var note = new Note { Title = "Pineapple recipe", Content = "Peel and slice" };
+        await _repo.CreateAsync(TestUserId, note, TestContext.Current.CancellationToken);
+
+        using var db = _dbFactory.CreateConnection(TestUserId);
+        var hit = await db.ExecuteScalarAsync<long>(
+            "SELECT count(*) FROM notes_fts WHERE notes_fts MATCH 'pineapple'");
+
+        Assert.Equal(1, hit);
+    }
+
+    [Fact]
+    public async Task Update_UpdatesFts_Test()
+    {
+        var note = new Note { Title = "Old title", Content = "old content" };
+        var id = await _repo.CreateAsync(TestUserId, note, TestContext.Current.CancellationToken);
+
+        note.Title = "New title";
+        note.Content = "quinoa salad";
+        await _repo.UpdateAsync(TestUserId, note, TestContext.Current.CancellationToken);
+
+        using var db = _dbFactory.CreateConnection(TestUserId);
+        var newHit = await db.ExecuteScalarAsync<long>(
+            "SELECT count(*) FROM notes_fts WHERE notes_fts MATCH 'quinoa'");
+        var oldHit = await db.ExecuteScalarAsync<long>(
+            "SELECT count(*) FROM notes_fts WHERE notes_fts MATCH 'old'");
+
+        Assert.Equal(1, newHit);
+        Assert.Equal(0, oldHit);
+    }
+
+    [Fact]
+    public async Task Delete_RemovesFromFts_Test()
+    {
+        var note = new Note { Title = "Ephemeral", Content = "gone tomorrow" };
+        var id = await _repo.CreateAsync(TestUserId, note, TestContext.Current.CancellationToken);
+
+        await _repo.DeleteAsync(TestUserId, id, TestContext.Current.CancellationToken);
+
+        using var db = _dbFactory.CreateConnection(TestUserId);
+        var hit = await db.ExecuteScalarAsync<long>(
+            "SELECT count(*) FROM notes_fts WHERE notes_fts MATCH 'ephemeral'");
+
+        Assert.Equal(0, hit);
     }
 
     public void Dispose()
