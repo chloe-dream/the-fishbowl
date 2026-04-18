@@ -97,6 +97,9 @@ builder.Services.AddOptions<GoogleOptions>(GoogleDefaults.AuthenticationScheme)
     {
         var clientId = repo.GetConfigAsync("Google:ClientId").GetAwaiter().GetResult();
         var clientSecret = repo.GetConfigAsync("Google:ClientSecret").GetAwaiter().GetResult();
+        // "placeholder" keeps GoogleOptions validation happy (non-empty) without being
+        // a usable credential. /login checks for "placeholder" explicitly and redirects
+        // to /setup. See docs/superpowers/specs/2026-04-18-a-plus-hardening-design.md §1.2.
         options.ClientId = clientId ?? "placeholder";
         options.ClientSecret = clientSecret ?? "placeholder";
     });

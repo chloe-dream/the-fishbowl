@@ -52,7 +52,7 @@ Bug and safety fixes only. No refactoring.
 
 The localhost/dev branch writes a placeholder-looking `ClientId` and an obviously-invented `ClientSecret` into `system.db` if no config exists. Even as placeholders, this shape invites a real secret to land in git history.
 
-**Fix:** delete the auto-seeding branch. If `Google:ClientId` is absent from `system_config`, the `GoogleOptions` configure callback sets the options to empty strings; the `/login` endpoint's existing check already redirects to `/setup` in that case. Local development uses user-secrets or the setup flow — never source.
+**Fix:** delete the auto-seeding branch. If `Google:ClientId` is absent from `system_config`, the `GoogleOptions` configure callback sets the options to the sentinel `"placeholder"` (the Google auth middleware's built-in options validation rejects empty strings, so a non-empty sentinel is required). The `/login` endpoint's existing check already redirects to `/setup` when the stored value is null or `"placeholder"`. Local development uses user-secrets or the setup flow — never source.
 
 **Tests:**
 - `AuthBehaviorTests.GetLoginChallenge_RedirectsToGoogle_Test` currently asserts `client_id=1049281787342...` from the auto-seed. Update it: seed the Google config explicitly in the test setup (via `ISystemRepository.SetConfigAsync` on the test host) and assert against those seeded values instead.

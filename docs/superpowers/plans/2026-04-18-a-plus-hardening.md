@@ -282,14 +282,15 @@ In `src/Fishbowl.Host/Program.cs`, replace lines 94–113 (the `AddOptions<Googl
 
 ```csharp
 // Delay Google Configuration until ISystemRepository is available.
-// Empty creds are valid — /login redirects to /setup when ClientId is empty/placeholder.
+// GoogleOptions validation rejects empty ClientId/Secret, so use "placeholder"
+// as a sentinel. /login checks for null-or-"placeholder" and redirects to /setup.
 builder.Services.AddOptions<GoogleOptions>(GoogleDefaults.AuthenticationScheme)
     .Configure<ISystemRepository>((options, repo) =>
     {
         var clientId = repo.GetConfigAsync("Google:ClientId").GetAwaiter().GetResult();
         var clientSecret = repo.GetConfigAsync("Google:ClientSecret").GetAwaiter().GetResult();
-        options.ClientId = clientId ?? "";
-        options.ClientSecret = clientSecret ?? "";
+        options.ClientId = clientId ?? "placeholder";
+        options.ClientSecret = clientSecret ?? "placeholder";
     });
 ```
 
