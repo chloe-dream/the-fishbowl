@@ -6,6 +6,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The Fishbowl is a self-hosted personal memory + assistant application. **`CONCEPT.md` is the full product/architecture spec** — much of it (Discord bot, search, sync, scripting, teams, apps, triggers) describes the target design, not what is built. Today, only `Fishbowl.Core`, `Fishbowl.Data`, `Fishbowl.Api`, and `Fishbowl.Host` have real implementations; the other projects (`Bot.Discord`, `Sync`, `Scheduler`, `Scripting`, `Search`) contain placeholder `Class1.cs` files. When making changes, align with CONCEPT.md — do not invent a different architecture.
 
+## Working style — adaptive programming
+
+Before writing new code, find the closest existing solution in this codebase and **extend it**, don't parallel it. Concretely:
+
+- **HTTP endpoints** inherit the `MapXxxApi()` extension pattern on `IEndpointRouteBuilder` (see `src/Fishbowl.Api/Endpoints/NotesApi.cs`); they read the user via the `fishbowl_user_id` claim and call a repository.
+- **Repositories** have an interface in `Fishbowl.Core.Repositories` and an implementation in `Fishbowl.Data.Repositories`, registered as `AddScoped`. Data access goes through `DatabaseFactory.CreateConnection(userId)` (per-user DB) or `CreateSystemConnection()` (global `system.db`).
+- **Multi-step writes** use Dapper with an explicit transaction — `WithUserTransactionAsync` on `DatabaseFactory` once Phase 3 lands; before that, inline `BeginTransaction`/`Commit`/`Rollback`.
+- **Schema changes** add an `ApplyVN` method in `DatabaseFactory` and bump `PRAGMA user_version` — no EF Core, no migration runner.
+- **UI resources, scripts, templates** go through `IResourceProvider.GetAsync(path)` (disk → database → embedded fallback), never direct file I/O.
+- **Plugins** implement `IFishbowlPlugin` and register capabilities via `IFishbowlApi.AddBotClient / AddSyncProvider / AddScheduledJob` (contracts live in `Fishbowl.Core.Plugins`).
+- **Configuration** goes in `system.db` via `ISystemRepository.Get/SetConfigAsync(key)` — never `appsettings.json` and never environment variables for anything the user sets at runtime.
+- **Tests** use `WebApplicationFactory<Program>` for integration, the `X-Test-User-Id` header via `TestAuthHandler` for auth scoping, and xUnit v3's `TestContext.Current.CancellationToken`.
+
+If an existing pattern almost-fits, add an overload / option / partial — don't reinvent a local copy. If the existing pattern is genuinely wrong, say so explicitly and propose migrating callers. **Never silently diverge.**
+
 ## Commands
 
 All commands run from the repo root. Target framework is **`net10.0`** across every project — the SDK must support .NET 10.
