@@ -368,13 +368,14 @@ jobs:
 **File:** `src/Fishbowl.Host/Program.cs`.
 
 - **Input validation on `POST /api/setup`**: `ClientId` non-empty, ends with `.apps.googleusercontent.com`. `ClientSecret` non-empty, minimum length 20 chars. Return `400 Bad Request` with a specific error message otherwise.
-- **Antiforgery**: `builder.Services.AddAntiforgery()`, `app.UseAntiforgery()`, and require a token on `POST /api/setup`. The GET `/setup` HTML page includes the token in a hidden field.
 - **Lockout after configuration**: once `Google:ClientId` is present and non-empty in `system_config`, both `GET /setup` and `POST /api/setup` return `404 Not Found`. No redirect (harder to bypass with header manipulation).
 
+Antiforgery is **not** added to `/api/setup`. CSRF protection requires an authenticated user whose cookies can be abused by a cross-site form; `/setup` only responds when unconfigured (no authenticated users exist yet). The only real attack surface is a stranger on the LAN beating the legit owner to the setup form — the same "attacker-setup-first" scenario explicitly rejected above.
+
 **Tests:**
-- `AuthBehaviorTests.Setup_Returns404_WhenConfigured_Test`.
-- `SetupFlowTests.PostSetup_Rejects_WhenAntiforgeryMissing_Test`.
+- `SetupFlowTests.Setup_Returns404_WhenConfigured_Test`.
 - `SetupFlowTests.PostSetup_Rejects_InvalidClientIdFormat_Test`.
+- `SetupFlowTests.PostSetup_Rejects_EmptyClientSecret_Test`.
 
 ### 4.3 `CONTRIBUTING.md`
 

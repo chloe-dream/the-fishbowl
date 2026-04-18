@@ -2513,7 +2513,7 @@ bypass than a redirect).
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```
 
-(Antiforgery is deferred — adding it requires reworking `setup.html` to render a token, which depends on migrating from the static embedded HTML to a server-rendered variant. Tracked as a follow-up in Task 4.4 loose ends.)
+(Antiforgery is intentionally not added to `/api/setup`. CSRF attacks require a user session whose cookies can be abused; `/setup` only responds when unconfigured, when no such session exists. See the spec's Phase 4.2 rationale.)
 
 ---
 
