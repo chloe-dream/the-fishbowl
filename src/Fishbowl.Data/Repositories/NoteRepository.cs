@@ -50,8 +50,13 @@ public class NoteRepository : INoteRepository
             await db.ExecuteAsync(new CommandDefinition(@"
                 INSERT INTO notes (id, title, content, content_secret, type, tags, created_by, created_at, updated_at, pinned, archived)
                 VALUES (@Id, @Title, @Content, @ContentSecret, @Type, @TagsJson, @CreatedBy, @CreatedAt, @UpdatedAt, @Pinned, @Archived)",
-                new {
-                    note.Id, note.Title, note.Content, note.ContentSecret, note.Type,
+                new
+                {
+                    note.Id,
+                    note.Title,
+                    note.Content,
+                    note.ContentSecret,
+                    note.Type,
                     TagsJson = JsonSerializer.Serialize(note.Tags),
                     note.CreatedBy,
                     CreatedAt = note.CreatedAt.ToString("o"),
@@ -62,8 +67,11 @@ public class NoteRepository : INoteRepository
 
             await db.ExecuteAsync(new CommandDefinition(
                 "INSERT INTO notes_fts (rowid, title, content, tags) VALUES ((SELECT rowid FROM notes WHERE id = @Id), @Title, @Content, @TagsFlat)",
-                new {
-                    note.Id, note.Title, note.Content,
+                new
+                {
+                    note.Id,
+                    note.Title,
+                    note.Content,
                     TagsFlat = string.Join(' ', note.Tags)
                 }, transaction: tx, cancellationToken: ct));
 
@@ -91,8 +99,12 @@ public class NoteRepository : INoteRepository
                     type = @Type, tags = @TagsJson, updated_at = @UpdatedAt,
                     pinned = @Pinned, archived = @Archived
                 WHERE id = @Id",
-                new {
-                    note.Title, note.Content, note.ContentSecret, note.Type,
+                new
+                {
+                    note.Title,
+                    note.Content,
+                    note.ContentSecret,
+                    note.Type,
                     TagsJson = JsonSerializer.Serialize(note.Tags),
                     UpdatedAt = note.UpdatedAt.ToString("o"),
                     Pinned = note.Pinned ? 1 : 0,
@@ -104,8 +116,11 @@ public class NoteRepository : INoteRepository
             {
                 await db.ExecuteAsync(new CommandDefinition(
                     "UPDATE notes_fts SET title = @Title, content = @Content, tags = @TagsFlat WHERE rowid = (SELECT rowid FROM notes WHERE id = @Id)",
-                    new {
-                        note.Id, note.Title, note.Content,
+                    new
+                    {
+                        note.Id,
+                        note.Title,
+                        note.Content,
                         TagsFlat = string.Join(' ', note.Tags)
                     }, transaction: tx, cancellationToken: ct));
             }

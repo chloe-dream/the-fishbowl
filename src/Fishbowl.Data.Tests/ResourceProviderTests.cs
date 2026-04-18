@@ -31,7 +31,7 @@ public class ResourceProviderTests : IDisposable
 
         var provider = new ResourceProvider(
             cache: _cache,
-            modsPath: _tempModsDir, 
+            modsPath: _tempModsDir,
             embeddedAssembly: typeof(ResourceProvider).Assembly
         );
 
@@ -68,7 +68,7 @@ public class ResourceProviderTests : IDisposable
 
         // Assert
         Assert.Equal(initialContent, Encoding.UTF8.GetString(secondResource!.Data));
-        Assert.Equal(ResourceSource.Disk, secondResource.Source); 
+        Assert.Equal(ResourceSource.Disk, secondResource.Source);
     }
 
     [Fact]
@@ -96,7 +96,7 @@ public class ResourceProviderTests : IDisposable
         // Arrange
         var provider = new ResourceProvider(
             cache: _cache,
-            modsPath: _tempModsDir, 
+            modsPath: _tempModsDir,
             embeddedAssembly: typeof(ResourceProvider).Assembly
         );
 
@@ -127,7 +127,7 @@ public class ResourceProviderTests : IDisposable
         // Arrange
         var provider = new ResourceProvider(
             cache: _cache,
-            modsPath: _tempModsDir, 
+            modsPath: _tempModsDir,
             embeddedAssembly: typeof(ResourceProvider).Assembly
         );
 

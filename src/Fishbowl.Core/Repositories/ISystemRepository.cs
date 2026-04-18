@@ -7,7 +7,7 @@ public interface ISystemRepository
     // User Mapping
     Task<string?> GetUserIdByMappingAsync(string provider, string providerId, CancellationToken ct = default);
     Task<bool> CreateUserMappingAsync(string userId, string provider, string providerId, CancellationToken ct = default);
-    
+
     // User Profile
     Task<bool> CreateUserAsync(string userId, string? name, string? email, string? avatarUrl, CancellationToken ct = default);
     Task<dynamic?> GetUserAsync(string userId, CancellationToken ct = default);

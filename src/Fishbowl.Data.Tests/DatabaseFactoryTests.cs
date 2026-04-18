@@ -67,7 +67,7 @@ public class DatabaseFactoryTests : IDisposable
 
         // Assert
         var tables = connection.Query<string>("SELECT name FROM sqlite_master WHERE type='table'").ToList();
-        
+
         Assert.Contains("notes", tables);
         Assert.Contains("events", tables);
         Assert.Contains("sync_sources", tables);

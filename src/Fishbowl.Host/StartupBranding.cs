@@ -13,7 +13,7 @@ public static class StartupBranding
             {
                 AnsiConsole.Clear();
             }
-            
+
             AnsiConsole.Write(new Rule("[gold1]THE FISHBOWL[/]").RuleStyle("grey"));
             AnsiConsole.WriteLine();
 

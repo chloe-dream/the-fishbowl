@@ -45,7 +45,7 @@ public class TodoRepository : ITodoRepository
         {
             item.Id = Ulid.NewUlid().ToString();
         }
-        
+
         item.CreatedAt = DateTime.UtcNow;
         item.UpdatedAt = item.CreatedAt;
         item.CreatedBy = userId;
@@ -54,7 +54,8 @@ public class TodoRepository : ITodoRepository
         await db.ExecuteAsync(new CommandDefinition(@"
             INSERT INTO todos (id, title, description, due_at, reminder_at, source, created_by, created_at, updated_at, completed_at)
             VALUES (@Id, @Title, @Description, @DueAt, @ReminderAt, @Source, @CreatedBy, @CreatedAt, @UpdatedAt, @CompletedAt)",
-            new {
+            new
+            {
                 item.Id,
                 item.Title,
                 item.Description,
@@ -85,7 +86,8 @@ public class TodoRepository : ITodoRepository
                 updated_at = @UpdatedAt, 
                 completed_at = @CompletedAt
             WHERE id = @Id",
-            new {
+            new
+            {
                 item.Title,
                 item.Description,
                 DueAt = item.DueAt?.ToString("o"),

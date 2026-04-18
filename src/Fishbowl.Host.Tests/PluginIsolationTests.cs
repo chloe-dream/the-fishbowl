@@ -35,7 +35,7 @@ public class PluginIsolationTests
 
         // 2. Compile it on-the-fly using Roslyn
         var syntaxTree = CSharpSyntaxTree.ParseText(pluginSource, cancellationToken: TestContext.Current.CancellationToken);
-        
+
         // We need to reference the assemblies for IFishbowlPlugin and IServiceCollection
         var references = new List<MetadataReference>
         {

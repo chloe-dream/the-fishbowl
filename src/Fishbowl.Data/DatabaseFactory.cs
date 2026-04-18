@@ -44,16 +44,16 @@ public class DatabaseFactory
 
         var connection = new SqliteConnection(connectionString);
         connection.Open();
-        
+
         initializer(connection);
-        
+
         return connection;
     }
 
     private void EnsureUserInitialized(IDbConnection connection)
     {
         var version = connection.ExecuteScalar<long>("PRAGMA user_version");
-        
+
         if (version < 1)
         {
             ApplyUserInitialSchema(connection);
@@ -64,7 +64,7 @@ public class DatabaseFactory
     private void EnsureSystemInitialized(IDbConnection connection)
     {
         var version = connection.ExecuteScalar<long>("PRAGMA user_version");
-        
+
         if (version < 1)
         {
             ApplySystemInitialSchema(connection);

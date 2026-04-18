@@ -15,10 +15,10 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Register Core Services
 builder.Services.AddMemoryCache();
-builder.Services.AddSingleton<IResourceProvider, ResourceProvider>(sp => 
+builder.Services.AddSingleton<IResourceProvider, ResourceProvider>(sp =>
     new ResourceProvider(
         cache: sp.GetRequiredService<IMemoryCache>(),
-        modsPath: "fishbowl-mods", 
+        modsPath: "fishbowl-mods",
         embeddedAssembly: typeof(ResourceProvider).Assembly));
 
 // Consistent data root from CLI or default
@@ -40,7 +40,7 @@ builder.Services.AddAuthentication(options =>
     options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
     options.DefaultChallengeScheme = CookieAuthenticationDefaults.AuthenticationScheme;
 })
-.AddCookie(options => 
+.AddCookie(options =>
 {
     options.LoginPath = "/login";
     options.Events.OnRedirectToLogin = context =>
@@ -59,7 +59,7 @@ builder.Services.AddAuthentication(options =>
         return Task.CompletedTask;
     };
 })
-.AddGoogle(options => 
+.AddGoogle(options =>
 {
     // These will be overridden by OpenOptions below
     options.ClientId = "placeholder";
@@ -75,7 +75,7 @@ builder.Services.AddAuthentication(options =>
         if (string.IsNullOrEmpty(providerId)) return;
 
         var internalUserId = await repo.GetUserIdByMappingAsync(provider, providerId);
-        
+
         if (string.IsNullOrEmpty(internalUserId))
         {
             // CREATE NEW USER (GUID)
@@ -132,7 +132,7 @@ if (!app.Environment.IsEnvironment("Testing"))
 }
 
 // Register Auth Endpoints
-app.MapGet("/login", async (string? returnUrl, HttpContext context, ISystemRepository repo) => 
+app.MapGet("/login", async (string? returnUrl, HttpContext context, ISystemRepository repo) =>
 {
     var clientId = await repo.GetConfigAsync("Google:ClientId");
     if (string.IsNullOrEmpty(clientId) || clientId == "placeholder")
@@ -147,7 +147,7 @@ app.MapGet("/login", async (string? returnUrl, HttpContext context, ISystemRepos
     return Results.Bytes(resource.Data, "text/html");
 });
 
-app.MapGet("/login/challenge/{provider}", (string provider, string? returnUrl) => 
+app.MapGet("/login/challenge/{provider}", (string provider, string? returnUrl) =>
 {
     var scheme = provider.ToLower() switch
     {
@@ -162,10 +162,10 @@ app.MapGet("/login/challenge/{provider}", (string provider, string? returnUrl) =
         authenticationSchemes: new[] { scheme });
 });
 
-app.MapGet("/api/auth/providers", async (ISystemRepository repo) => 
+app.MapGet("/api/auth/providers", async (ISystemRepository repo) =>
 {
     var providers = new List<object>();
-    
+
     var googleClientId = await repo.GetConfigAsync("Google:ClientId");
     if (!string.IsNullOrEmpty(googleClientId) && googleClientId != "placeholder")
     {
@@ -175,13 +175,13 @@ app.MapGet("/api/auth/providers", async (ISystemRepository repo) =>
     return Results.Ok(providers);
 });
 
-app.MapGet("/setup", async (HttpContext context, ISystemRepository repo) => 
+app.MapGet("/setup", async (HttpContext context, ISystemRepository repo) =>
 {
     // Only allow setup if not configured or from localhost
     var clientId = await repo.GetConfigAsync("Google:ClientId");
     if (!string.IsNullOrEmpty(clientId) && clientId != "placeholder")
     {
-         return Results.Redirect("/");
+        return Results.Redirect("/");
     }
 
     var resourceProvider = context.RequestServices.GetRequiredService<IResourceProvider>();
@@ -191,7 +191,7 @@ app.MapGet("/setup", async (HttpContext context, ISystemRepository repo) =>
     return Results.Bytes(resource.Data, "text/html");
 });
 
-app.MapPost("/api/setup", async (SetupRequest request, ISystemRepository repo) => 
+app.MapPost("/api/setup", async (SetupRequest request, ISystemRepository repo) =>
 {
     await repo.SetConfigAsync("Google:ClientId", request.ClientId);
     await repo.SetConfigAsync("Google:ClientSecret", request.ClientSecret);
@@ -240,16 +240,16 @@ static string GetContentType(string path)
     return ext switch
     {
         ".html" => "text/html",
-        ".css"  => "text/css",
-        ".js"   => "application/javascript",
+        ".css" => "text/css",
+        ".js" => "application/javascript",
         ".json" => "application/json",
-        ".png"  => "image/png",
-        ".jpg"  => "image/jpeg",
-        ".ico"  => "image/x-icon",
-        ".svg"  => "image/svg+xml",
+        ".png" => "image/png",
+        ".jpg" => "image/jpeg",
+        ".ico" => "image/x-icon",
+        ".svg" => "image/svg+xml",
         ".woff" => "font/woff",
-        ".woff2"=> "font/woff2",
-        _       => "application/octet-stream"
+        ".woff2" => "font/woff2",
+        _ => "application/octet-stream"
     };
 }
 

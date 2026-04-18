@@ -42,7 +42,7 @@ public class NoteRepositoryTests : IDisposable
         Assert.NotNull(id);
         Assert.Equal(id, note.Id);
         Assert.Equal(TestUserId, note.CreatedBy);
-        
+
         var retrieved = await _repo.GetByIdAsync(TestUserId, id, TestContext.Current.CancellationToken);
         Assert.NotNull(retrieved);
         Assert.Equal("Test Note", retrieved.Title);

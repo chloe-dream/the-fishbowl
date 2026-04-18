@@ -19,7 +19,7 @@ public class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions
     public const string AuthenticationScheme = "TestScheme";
     public const string UserIdHeader = "X-Test-User-Id";
 
-    public TestAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, 
+    public TestAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions> options,
         ILoggerFactory logger, UrlEncoder encoder) : base(options, logger, encoder) { }
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
@@ -29,9 +29,9 @@ public class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions
             return Task.FromResult(AuthenticateResult.Fail("No User ID provided in test header"));
         }
 
-        var claims = new[] { 
+        var claims = new[] {
             new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
-            new Claim("fishbowl_user_id", userId.ToString()) 
+            new Claim("fishbowl_user_id", userId.ToString())
         };
         var identity = new ClaimsIdentity(claims, AuthenticationScheme);
         var principal = new ClaimsPrincipal(identity);
@@ -82,7 +82,7 @@ public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
     {
         // Arrange
         var client = _factory.CreateClient();
-        
+
         var noteA = new Note { Title = "User A Note" };
         var noteB = new Note { Title = "User B Note" };
 
@@ -115,7 +115,7 @@ public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
         // Assert
         Assert.Single(notesA!);
         Assert.Equal("User A Note", notesA!.First().Title);
-        
+
         Assert.Single(notesB!);
         Assert.Equal("User B Note", notesB!.First().Title);
     }

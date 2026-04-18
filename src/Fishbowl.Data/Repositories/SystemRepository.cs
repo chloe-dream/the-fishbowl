@@ -17,7 +17,7 @@ public class SystemRepository : ISystemRepository
     {
         using var db = _dbFactory.CreateSystemConnection();
         return await db.QuerySingleOrDefaultAsync<string>(
-            new CommandDefinition("SELECT user_id FROM user_mappings WHERE provider = @provider AND provider_id = @providerId", 
+            new CommandDefinition("SELECT user_id FROM user_mappings WHERE provider = @provider AND provider_id = @providerId",
             new { provider, providerId }, cancellationToken: ct));
     }
 
@@ -25,7 +25,7 @@ public class SystemRepository : ISystemRepository
     {
         using var db = _dbFactory.CreateSystemConnection();
         var affected = await db.ExecuteAsync(
-            new CommandDefinition("INSERT INTO user_mappings (provider, provider_id, user_id) VALUES (@provider, @providerId, @userId)", 
+            new CommandDefinition("INSERT INTO user_mappings (provider, provider_id, user_id) VALUES (@provider, @providerId, @userId)",
             new { provider, providerId, userId }, cancellationToken: ct));
         return affected > 0;
     }
@@ -34,7 +34,7 @@ public class SystemRepository : ISystemRepository
     {
         using var db = _dbFactory.CreateSystemConnection();
         var affected = await db.ExecuteAsync(
-            new CommandDefinition("INSERT INTO users (id, name, email, avatar_url, created_at) VALUES (@userId, @name, @email, @avatarUrl, @createdAt)", 
+            new CommandDefinition("INSERT INTO users (id, name, email, avatar_url, created_at) VALUES (@userId, @name, @email, @avatarUrl, @createdAt)",
             new { userId, name, email, avatarUrl, createdAt = DateTime.UtcNow.ToString("o") }, cancellationToken: ct));
         return affected > 0;
     }
@@ -60,7 +60,7 @@ public class SystemRepository : ISystemRepository
             new CommandDefinition(@"
                 INSERT INTO system_config (key, value, updated_at) 
                 VALUES (@key, @value, @updatedAt)
-                ON CONFLICT(key) DO UPDATE SET value = @value, updated_at = @updatedAt", 
+                ON CONFLICT(key) DO UPDATE SET value = @value, updated_at = @updatedAt",
             new { key, value, updatedAt = DateTime.UtcNow.ToString("o") }, cancellationToken: ct));
         return affected > 0;
     }
