@@ -237,6 +237,7 @@ app.MapGet("/logout", async (HttpContext context) =>
 });
 
 // Register API Endpoints
+app.MapVersionApi();
 app.MapNotesApi();
 app.MapTodoApi();
 

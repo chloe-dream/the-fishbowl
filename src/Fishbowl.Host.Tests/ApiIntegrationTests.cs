@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
@@ -147,6 +148,20 @@ public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
         var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Get_Version_ReturnsVersionString_Test()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/api/v1/version", TestContext.Current.CancellationToken);
+
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>(TestContext.Current.CancellationToken);
+        Assert.NotNull(body);
+        Assert.True(body!.ContainsKey("version"));
+        Assert.False(string.IsNullOrEmpty(body["version"]));
     }
 
     public void Dispose()
