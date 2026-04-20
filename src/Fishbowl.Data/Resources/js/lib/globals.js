@@ -12,6 +12,7 @@
         api:     null,                  // populated by api.js
         router:  null,                  // populated by router.js
         icons:   null,                  // populated by icons.js
+        dialog:  null,                  // populated by dialog.js
         /**
          * Nav ribbon toolbar — views call fb.toolbar.set([...]) to project
          * action icons into the fixed <fb-nav> ribbon. <fb-nav> registers
