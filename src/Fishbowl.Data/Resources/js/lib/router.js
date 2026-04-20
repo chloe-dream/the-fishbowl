@@ -1,10 +1,10 @@
 /**
  * Fishbowl — hash-based SPA router.
- * Views are custom elements registered via fb.router.register("#/hash", "tag-name").
+ * Views are custom elements registered via fb.router.register("#/hash", "tag-name", { label, icon }).
  * On hashchange, the root mount point's innerHTML is swapped to the matching tag.
  */
 (function () {
-    const routes = new Map();    // "#/notes" → "fb-notes-view"
+    const routes = new Map();    // "#/notes" → { tag, label, icon }
     let rootElement = null;
 
     function currentHash() {
@@ -14,25 +14,22 @@
     function render() {
         if (!rootElement) return;
         const hash = currentHash();
-        const tag = routes.get(hash) || routes.get("#/");
-        if (!tag) {
-            rootElement.innerHTML = "";
-            return;
-        }
-        // Clear + remount. Views are self-destructing: the browser disconnects
-        // the removed element and connects the new one.
-        rootElement.innerHTML = `<${tag}></${tag}>`;
+        const entry = routes.get(hash) || routes.get("#/");
+        if (!entry) { rootElement.innerHTML = ""; return; }
+        rootElement.innerHTML = `<${entry.tag}></${entry.tag}>`;
     }
 
     fb.router = {
-        register(hash, tagName) {
-            routes.set(hash, tagName);
-            // If mount() already happened and this registration matches the
-            // current hash, render immediately (handles late-loading views).
+        register(hash, tagName, options = {}) {
+            routes.set(hash, {
+                tag: tagName,
+                label: options.label || tagName,
+                icon:  options.icon  || null
+            });
             if (rootElement && currentHash() === hash) render();
         },
         routes() {
-            return Array.from(routes.entries()); // [[hash, tag], ...]
+            return Array.from(routes.entries()).map(([hash, info]) => ({ hash, ...info }));
         },
         current() {
             return currentHash();
