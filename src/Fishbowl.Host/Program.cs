@@ -350,19 +350,41 @@ app.MapFallback("{*path}", async (HttpContext context, IResourceProvider resourc
         return Results.NotFound();
     }
 
-    var resource = await resources.GetAsync(path);
+    // Dev-loop hot-reload: when devtools has "Disable cache" on, browsers
+    // send Cache-Control: no-cache (and Pragma: no-cache) on every request.
+    // We mirror that: bypass ResourceProvider's in-memory cache and tell the
+    // browser not to cache the response either. End users (no devtools) hit
+    // the fast path unchanged.
+    var bypassCache = RequestHasNoCache(context.Request);
+    var resource = await resources.GetAsync(path, context.RequestAborted, bypassCache);
 
     if (resource == null)
     {
         if (path.Contains('.')) return Results.NotFound();
         path = "index.html";
-        resource = await resources.GetAsync(path);
+        resource = await resources.GetAsync(path, context.RequestAborted, bypassCache);
         if (resource == null) return Results.NotFound();
+    }
+
+    if (bypassCache)
+    {
+        context.Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
     }
 
     var contentType = GetContentType(path);
     return Results.Bytes(resource.Data, contentType);
 });
+
+static bool RequestHasNoCache(HttpRequest request)
+{
+    if (request.Headers.TryGetValue("Cache-Control", out var cc) &&
+        cc.ToString().Contains("no-cache", StringComparison.OrdinalIgnoreCase))
+        return true;
+    if (request.Headers.TryGetValue("Pragma", out var pragma) &&
+        pragma.ToString().Contains("no-cache", StringComparison.OrdinalIgnoreCase))
+        return true;
+    return false;
+}
 
 static string GetContentType(string path)
 {

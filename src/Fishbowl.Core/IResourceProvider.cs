@@ -28,7 +28,14 @@ public interface IResourceProvider
     /// <summary>
     /// Retrieves a resource by its path.
     /// </summary>
-    Task<Resource?> GetAsync(string path, CancellationToken ct = default);
+    /// <param name="bypassCache">
+    /// When true, skips the in-memory cache (both read and write) and
+    /// re-reads the resource from disk/embedded on every call. Intended
+    /// for the dev loop — the HTTP layer sets this when the browser sends
+    /// <c>Cache-Control: no-cache</c> (i.e. devtools open with "Disable
+    /// cache" checked).
+    /// </param>
+    Task<Resource?> GetAsync(string path, CancellationToken ct = default, bool bypassCache = false);
 
     /// <summary>
     /// Checks if a resource exists.

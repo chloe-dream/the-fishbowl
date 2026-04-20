@@ -25,9 +25,9 @@ public class ResourceProvider : IResourceProvider
         _logger = logger ?? NullLogger<ResourceProvider>.Instance;
     }
 
-    public async Task<Resource?> GetAsync(string path, CancellationToken ct = default)
+    public async Task<Resource?> GetAsync(string path, CancellationToken ct = default, bool bypassCache = false)
     {
-        if (_cache.TryGetValue(path, out Resource? cached))
+        if (!bypassCache && _cache.TryGetValue(path, out Resource? cached))
             return cached;
 
         Resource? resource = null;
@@ -53,7 +53,7 @@ public class ResourceProvider : IResourceProvider
         if (resource != null)
         {
             _logger.LogDebug("Resource {Path} served from {Source}", resource.Path, resource.Source);
-            _cache.Set(path, resource);
+            if (!bypassCache) _cache.Set(path, resource);
         }
 
         return resource;
