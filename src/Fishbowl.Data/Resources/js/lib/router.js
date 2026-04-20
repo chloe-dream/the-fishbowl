@@ -26,6 +26,12 @@
                 label: options.label || tagName,
                 icon:  options.icon  || null
             });
+            // Notify listeners (e.g. <fb-nav>) that the route table changed.
+            // Needed because nav components are instantiated before view
+            // scripts register, so their first render sees an empty map.
+            window.dispatchEvent(new CustomEvent("fb:route-registered", {
+                detail: { hash, tag: tagName }
+            }));
             if (rootElement && currentHash() === hash) render();
         },
         routes() {

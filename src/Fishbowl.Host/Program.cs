@@ -134,8 +134,8 @@ if (!app.Environment.IsDevelopment())
 }
 app.UseHttpsRedirection();
 
-// Playwright smoke-test auth bypass. Injects a test user so the browser-driven
-// test can touch authenticated routes without a real Google OAuth dance.
+// Playwright smoke-test bypass. Seeds fake OAuth config + injects a test user
+// so the browser-driven test can skip setup and auth dances.
 // Double-gated: requires ASPNETCORE_ENVIRONMENT=Testing AND the env var below.
 // Enabled by Fishbowl.Ui.Tests/PlaywrightFixture.cs — never set this env var
 // anywhere else.
@@ -143,8 +143,17 @@ if (app.Environment.IsEnvironment("Testing")
     && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FISHBOWL_PLAYWRIGHT_TEST")))
 {
     app.Logger.LogWarning("Playwright test-auth middleware ACTIVE. This must only happen in Fishbowl.Ui.Tests.");
+
     app.Use(async (context, next) =>
     {
+        // Seed the configuration cache per-request so the root route doesn't
+        // redirect to /setup. ConfigurationInitializer runs at startup and
+        // overwrites static seeding with empty values from the test DB, so we
+        // re-apply here. Set is O(1) on a ConcurrentDictionary.
+        var cache = context.RequestServices.GetRequiredService<Fishbowl.Host.Configuration.ConfigurationCache>();
+        cache.Set("Google:ClientId", "playwright-test.apps.googleusercontent.com");
+        cache.Set("Google:ClientSecret", "playwright-test-secret-value-long-enough");
+
         var identity = new ClaimsIdentity(CookieAuthenticationDefaults.AuthenticationScheme);
         identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, "test-user-id"));
         identity.AddClaim(new Claim("fishbowl_user_id", "test-internal-id"));
@@ -261,6 +270,28 @@ app.MapGet("/logout", async (HttpContext context) =>
 app.MapVersionApi();
 app.MapNotesApi();
 app.MapTodoApi();
+
+// Root route — gate the hub behind setup + authentication so the first click
+// on a tile doesn't dump an unconfigured user into /setup via a silent 401
+// redirect chain. Order:
+//   1. Not configured → /setup
+//   2. Not authenticated → /login
+//   3. Authenticated + configured → serve index.html (the SPA shell)
+// Static assets (/css/*, /js/*) stay anonymous via the fallback below.
+app.MapGet("/", async (HttpContext context, Fishbowl.Host.Configuration.ConfigurationCache cache, IResourceProvider resources) =>
+{
+    var clientId = cache.Get("Google:ClientId");
+    if (string.IsNullOrEmpty(clientId) || clientId == "placeholder")
+        return Results.Redirect("/setup");
+
+    if (context.User.Identity?.IsAuthenticated != true)
+        return Results.Redirect("/login");
+
+    var resource = await resources.GetAsync("index.html");
+    return resource != null
+        ? Results.Bytes(resource.Data, "text/html")
+        : Results.NotFound("Index not found.");
+});
 
 // Fallback to serve Web UI from ResourceProvider
 app.MapFallback("{*path}", async (HttpContext context, IResourceProvider resources) =>

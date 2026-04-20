@@ -4,7 +4,8 @@
  * </fb-nav>
  *
  * Fixed 50px ribbon with glassmorphic background + slide-out 300px panel.
- * Panel nav list is computed from fb.router.routes().
+ * Panel nav list is computed from fb.router.routes() and re-rendered whenever
+ * a new route registers (fb:route-registered event) or the hash changes.
  *
  * Attributes:
  *   app-name — uppercase text after "THE FISHBOWL ·" in the brand area.
@@ -21,7 +22,13 @@ class FbNav extends HTMLElement {
 
     connectedCallback() {
         this.render();
-        this.attachHandlers();
+        this.attachPersistentHandlers();
+    }
+
+    disconnectedCallback() {
+        if (this._escHandler)   document.removeEventListener("keydown", this._escHandler);
+        if (this._hashHandler)  window.removeEventListener("hashchange", this._hashHandler);
+        if (this._routeHandler) window.removeEventListener("fb:route-registered", this._routeHandler);
     }
 
     render() {
@@ -57,14 +64,18 @@ class FbNav extends HTMLElement {
                     margin-right: 0.5rem;
                     font-size: 1.2rem;
                     border-radius: 6px;
+                    display: flex;
+                    align-items: center;
                 }
                 .menu-btn:hover { background: rgba(255,255,255,0.08); }
-                .logo-mark {
-                    display: flex; flex-direction: column; gap: 2px;
-                    width: 12px; height: 18px; margin-right: 0.75rem;
+                .menu-btn fb-icon { --icon-size: 20px; }
+                .brand-mark {
+                    color: var(--accent);
+                    margin-right: 0.6rem;
+                    display: flex;
+                    align-items: center;
                 }
-                .logo-mark .top    { flex: 1; background: var(--accent);      border-radius: 8px 8px 0 0; }
-                .logo-mark .bottom { flex: 1; background: var(--accent-warm); border-radius: 0 0 8px 8px; }
+                .brand-mark fb-icon { --icon-size: 22px; }
                 .brand {
                     font-family: 'Outfit', sans-serif;
                     font-weight: 800;
@@ -72,6 +83,7 @@ class FbNav extends HTMLElement {
                     letter-spacing: 0.08em;
                     color: #f8fafc;
                     display: flex; align-items: center; gap: 0.5rem;
+                    text-decoration: none;
                 }
                 .brand .sep { color: rgba(255,255,255,0.3); }
                 .brand .app-name { color: var(--accent); }
@@ -128,13 +140,19 @@ class FbNav extends HTMLElement {
                     padding-left: calc(1.5rem - 3px);
                 }
                 .nav-item fb-icon { --icon-size: 18px; }
+                .panel-empty {
+                    padding: 1rem 1.5rem;
+                    color: #64748b;
+                    font-size: 0.85rem;
+                    font-style: italic;
+                }
             </style>
             <nav class="ribbon">
                 <button class="menu-btn" aria-label="Menu">
                     <fb-icon name="menu"></fb-icon>
                 </button>
                 <a class="brand" href="#/">
-                    <span class="logo-mark"><span class="top"></span><span class="bottom"></span></span>
+                    <span class="brand-mark"><fb-icon name="fish"></fb-icon></span>
                     <span>THE FISHBOWL</span>
                     ${appName ? `<span class="sep">·</span><span class="app-name">${appName}</span>` : ``}
                 </a>
@@ -143,44 +161,68 @@ class FbNav extends HTMLElement {
             </nav>
             <div class="backdrop"></div>
             <aside class="panel">
-                <ul class="nav-list">
-                    ${routes.map(r => `
-                        <li>
-                            <a class="nav-item ${r.hash === current ? "active" : ""}" href="${r.hash}">
-                                ${r.icon ? `<fb-icon name="${r.icon}"></fb-icon>` : ""}
-                                <span>${r.label}</span>
-                            </a>
-                        </li>
-                    `).join("")}
-                </ul>
+                ${routes.length === 0
+                    ? `<div class="panel-empty">No sections yet.</div>`
+                    : `<ul class="nav-list">
+                         ${routes.map(r => `
+                             <li>
+                                 <a class="nav-item ${r.hash === current ? "active" : ""}" href="${r.hash}">
+                                     ${r.icon ? `<fb-icon name="${r.icon}"></fb-icon>` : ""}
+                                     <span>${r.label}</span>
+                                 </a>
+                             </li>
+                         `).join("")}
+                       </ul>`}
             </aside>
         `;
+
+        // Re-attach handlers on freshly-rendered shadow-root children.
+        this.attachEphemeralHandlers();
     }
 
-    attachHandlers() {
-        const menuBtn = this.shadowRoot.querySelector(".menu-btn");
+    attachEphemeralHandlers() {
+        const menuBtn  = this.shadowRoot.querySelector(".menu-btn");
         const backdrop = this.shadowRoot.querySelector(".backdrop");
-        const panel = this.shadowRoot.querySelector(".panel");
+        const panel    = this.shadowRoot.querySelector(".panel");
 
-        const toggle = () => {
-            this.isOpen = !this.isOpen;
-            backdrop.classList.toggle("open", this.isOpen);
-            panel.classList.toggle("open", this.isOpen);
+        const setOpen = (open) => {
+            this.isOpen = open;
+            backdrop.classList.toggle("open", open);
+            panel.classList.toggle("open", open);
         };
-        menuBtn.addEventListener("click", toggle);
-        backdrop.addEventListener("click", toggle);
+        const toggle = () => setOpen(!this.isOpen);
 
-        this._escHandler = (e) => { if (e.key === "Escape" && this.isOpen) toggle(); };
+        menuBtn.addEventListener("click",  toggle);
+        backdrop.addEventListener("click", () => setOpen(false));
+
+        // Clicking a panel nav-item also closes the panel.
+        this.shadowRoot.querySelectorAll(".nav-item").forEach(el => {
+            el.addEventListener("click", () => setOpen(false));
+        });
+
+        // Restore panel state after a re-render (routes changed while open).
+        if (this.isOpen) setOpen(true);
+    }
+
+    attachPersistentHandlers() {
+        this._escHandler = (e) => {
+            if (e.key === "Escape" && this.isOpen) {
+                const backdrop = this.shadowRoot.querySelector(".backdrop");
+                const panel    = this.shadowRoot.querySelector(".panel");
+                this.isOpen = false;
+                backdrop.classList.remove("open");
+                panel.classList.remove("open");
+            }
+        };
         document.addEventListener("keydown", this._escHandler);
 
-        // Re-render on route change so the active highlight updates.
         this._hashHandler = () => this.render();
         window.addEventListener("hashchange", this._hashHandler);
-    }
 
-    disconnectedCallback() {
-        if (this._escHandler)  document.removeEventListener("keydown",    this._escHandler);
-        if (this._hashHandler) window.removeEventListener("hashchange",   this._hashHandler);
+        // Re-render when a new route is registered so the panel fills in
+        // even if view scripts run after the nav's first render.
+        this._routeHandler = () => this.render();
+        window.addEventListener("fb:route-registered", this._routeHandler);
     }
 }
 

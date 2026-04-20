@@ -13,7 +13,7 @@
 
     const defaults = {
         // brand
-        "fish":          '<path d="M3 12c4-5 9-5 13 0-4 5-9 5-13 0z"/><path d="M16 12l4-2v4l-4-2z"/><circle cx="8" cy="11" r="0.5" fill="currentColor"/>',
+        "fish":          '<ellipse cx="10" cy="12" rx="7" ry="4"/><path d="M17 12l4-3v6z"/><circle cx="6" cy="11" r="1" fill="currentColor"/><path d="M7 14q1 0.6 2 0"/>',
         "bowl":          '<path d="M4 10h16v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8z"/><path d="M3 10h18"/><path d="M8 6v4"/><path d="M16 6v4"/>',
         // content
         "note":          '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8"/><path d="M8 12h8"/><path d="M8 16h5"/>',
