@@ -44,7 +44,7 @@ using (var tempLoggerFactory = LoggerFactory.Create(lb => lb.AddConsole()))
 }
 
 // Authentication Configuration
-builder.Services.AddAuthentication(options =>
+var authBuilder = builder.Services.AddAuthentication(options =>
 {
     options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
     options.DefaultChallengeScheme = CookieAuthenticationDefaults.AuthenticationScheme;
@@ -60,15 +60,16 @@ builder.Services.AddAuthentication(options =>
         }
         else
         {
-            // If we are in "Setup Mode" (no valid Google Config), 
+            // If we are in "Setup Mode" (no valid Google Config),
             // we should probably redirect to /setup instead of /login (which challenges Google)
             // For now, /login handles it.
             context.Response.Redirect(context.RedirectUri);
         }
         return Task.CompletedTask;
     };
-})
-.AddGoogle(options =>
+});
+
+authBuilder.AddGoogle(options =>
 {
     // These will be overridden by OpenOptions below
     options.ClientId = "placeholder";
@@ -108,7 +109,10 @@ builder.Services.AddAuthentication(options =>
 
 // Configuration snapshot populated before the server starts listening
 builder.Services.AddSingleton<Fishbowl.Host.Configuration.ConfigurationCache>();
-builder.Services.AddHostedService<Fishbowl.Host.Configuration.ConfigurationInitializer>();
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    builder.Services.AddHostedService<Fishbowl.Host.Configuration.ConfigurationInitializer>();
+}
 
 // Google OAuth options bind from the cache (populated by the hosted service).
 // Auth middleware resolves via IOptionsMonitor<GoogleOptions> which re-runs this
@@ -132,6 +136,20 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 app.UseHttpsRedirection();
+
+// For Playwright testing, inject a test user BEFORE auth runs
+if (app.Environment.IsEnvironment("Testing") && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FISHBOWL_PLAYWRIGHT_TEST")))
+{
+    app.Use(async (context, next) =>
+    {
+        var identity = new ClaimsIdentity(CookieAuthenticationDefaults.AuthenticationScheme);
+        identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, "test-user-id"));
+        identity.AddClaim(new Claim("fishbowl_user_id", "test-internal-id"));
+        var principal = new ClaimsPrincipal(identity);
+        context.User = principal;
+        await next();
+    });
+}
 
 app.UseAuthentication();
 app.UseAuthorization();
