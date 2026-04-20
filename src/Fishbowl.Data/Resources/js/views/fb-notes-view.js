@@ -1,22 +1,30 @@
 /**
  * <fb-notes-view>  (mounted at #/notes)
  *
- * Three-pane layout: sidebar (filters) + list-pane + editor-pane.
- * Data loaded on connect via fb.api.notes.list().
+ * iCloud-style two-pane notes UI:
+ *   - List pane: search, "All Notes" header with filter + new-note actions,
+ *     rich items (title + date + snippet + pin indicator).
+ *   - Editor pane: centered timestamp, title + content inputs, delete and
+ *     pin actions in the top-left of the header.
  *
- * Light-DOM so app.css classes apply.
+ * Pinned notes always sort first; archived are hidden unless the archive
+ * button is toggled. Search filters title + content.
+ *
+ * Light-DOM so app.css tokens apply; all component-specific CSS is scoped
+ * with `fb-notes-view` to avoid leaking into other views.
  */
 class FbNotesView extends HTMLElement {
     constructor() {
         super();
         this.notes = [];
         this.selectedId = null;
-        this.filters = { pinned: false, archived: false };
+        this.showArchived = false;
+        this.searchQuery = "";
     }
 
-    connectedCallback() {
+    async connectedCallback() {
         this.render();
-        this.loadNotes();
+        await this.loadNotes();
     }
 
     async loadNotes() {
@@ -30,82 +38,353 @@ class FbNotesView extends HTMLElement {
 
     render() {
         this.innerHTML = `
-            <div class="tool-layout">
-                <aside class="tool-sidebar">
-                    <fb-section title="Filters">
-                        <fb-toggle label="Pinned only" id="filter-pinned"></fb-toggle>
-                        <fb-toggle label="Show archived" id="filter-archived"></fb-toggle>
-                    </fb-section>
-                    <fb-section title="Actions">
-                        <button class="btn primary" id="new-btn">
-                            <fb-icon name="plus"></fb-icon> New note
+            <style>
+                fb-notes-view { display: block; height: 100%; }
+                fb-notes-view .nv-layout {
+                    display: flex;
+                    height: calc(100vh - 50px);
+                    background: var(--bg);
+                }
+
+                /* --- LIST PANE ------------------------------------------------- */
+                fb-notes-view .nv-list-pane {
+                    width: 340px;
+                    background: var(--panel);
+                    border-right: 1px solid var(--border);
+                    display: flex;
+                    flex-direction: column;
+                    flex-shrink: 0;
+                }
+                fb-notes-view .nv-search {
+                    position: relative;
+                    padding: 12px 12px 0;
+                }
+                fb-notes-view .nv-search fb-icon {
+                    position: absolute;
+                    left: 22px;
+                    top: 12px;
+                    height: 32px;
+                    display: flex;
+                    align-items: center;
+                    color: var(--text-muted);
+                    --icon-size: 14px;
+                    pointer-events: none;
+                }
+                fb-notes-view .nv-search input {
+                    width: 100%;
+                    background: rgba(0, 0, 0, 0.3);
+                    border: 1px solid var(--border);
+                    border-radius: 8px;
+                    padding: 7px 10px 7px 32px;
+                    color: var(--text);
+                    font-family: inherit;
+                    font-size: 13px;
+                    outline: none;
+                    transition: border-color 0.15s;
+                }
+                fb-notes-view .nv-search input::placeholder { color: var(--text-muted); }
+                fb-notes-view .nv-search input:focus { border-color: var(--accent); }
+
+                fb-notes-view .nv-list-header {
+                    display: flex;
+                    align-items: center;
+                    padding: 12px 16px 6px;
+                    gap: 2px;
+                }
+                fb-notes-view .nv-list-title {
+                    flex: 1;
+                    font-family: 'Outfit', sans-serif;
+                    font-weight: 700;
+                    font-size: 11px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.1em;
+                    color: var(--text-muted);
+                }
+                fb-notes-view .nv-icon-btn {
+                    padding: 5px 7px;
+                    border-radius: 6px;
+                    background: transparent;
+                    border: none;
+                    color: var(--text-muted);
+                    cursor: pointer;
+                    display: inline-flex;
+                    align-items: center;
+                    transition: background 0.15s, color 0.15s;
+                }
+                fb-notes-view .nv-icon-btn:hover {
+                    background: rgba(255, 255, 255, 0.06);
+                    color: var(--text);
+                }
+                fb-notes-view .nv-icon-btn.active {
+                    background: rgba(249, 115, 22, 0.15);
+                    color: var(--accent-warm);
+                }
+                fb-notes-view .nv-icon-btn fb-icon { --icon-size: 16px; }
+
+                fb-notes-view .nv-items {
+                    flex: 1;
+                    overflow-y: auto;
+                    padding: 2px 8px 12px;
+                }
+                fb-notes-view .nv-items::-webkit-scrollbar { width: 6px; }
+                fb-notes-view .nv-items::-webkit-scrollbar-thumb {
+                    background: rgba(255, 255, 255, 0.1);
+                    border-radius: 3px;
+                }
+
+                fb-notes-view .nv-item {
+                    padding: 10px 12px;
+                    border-radius: 10px;
+                    cursor: pointer;
+                    margin-bottom: 2px;
+                    border: 1px solid transparent;
+                    transition: background 0.12s, border-color 0.12s;
+                }
+                fb-notes-view .nv-item:hover { background: rgba(255, 255, 255, 0.04); }
+                fb-notes-view .nv-item.selected {
+                    background: rgba(249, 115, 22, 0.15);
+                    border-color: rgba(249, 115, 22, 0.35);
+                }
+                fb-notes-view .nv-item-title-row {
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    margin-bottom: 4px;
+                }
+                fb-notes-view .nv-item-title {
+                    font-weight: 600;
+                    font-size: 14px;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                    color: var(--text);
+                    flex: 1;
+                }
+                fb-notes-view .nv-item-title-row fb-icon {
+                    --icon-size: 12px;
+                    color: var(--accent-warm);
+                    flex-shrink: 0;
+                }
+                fb-notes-view .nv-item-preview {
+                    display: flex;
+                    gap: 6px;
+                    font-size: 12px;
+                    line-height: 1.4;
+                    color: var(--text-muted);
+                    align-items: baseline;
+                }
+                fb-notes-view .nv-item-date {
+                    flex-shrink: 0;
+                    font-variant-numeric: tabular-nums;
+                }
+                fb-notes-view .nv-item-snippet {
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                    flex: 1;
+                }
+                fb-notes-view .nv-empty-list {
+                    padding: 40px 16px;
+                    text-align: center;
+                    color: var(--text-muted);
+                    font-size: 13px;
+                }
+
+                /* --- EDITOR PANE ---------------------------------------------- */
+                fb-notes-view .nv-editor-pane {
+                    flex: 1;
+                    display: flex;
+                    flex-direction: column;
+                    min-width: 0;
+                }
+                fb-notes-view .nv-editor-header {
+                    display: grid;
+                    grid-template-columns: 1fr auto 1fr;
+                    align-items: center;
+                    padding: 10px 20px;
+                    min-height: 44px;
+                    border-bottom: 1px solid var(--border);
+                    gap: 8px;
+                }
+                fb-notes-view .nv-editor-actions {
+                    display: flex;
+                    gap: 4px;
+                    justify-self: start;
+                }
+                fb-notes-view .nv-editor-timestamp {
+                    font-size: 11px;
+                    color: var(--text-muted);
+                    text-align: center;
+                    letter-spacing: 0.02em;
+                }
+                fb-notes-view .nv-editor-body {
+                    flex: 1;
+                    overflow: auto;
+                    padding: 36px 56px;
+                    display: flex;
+                    flex-direction: column;
+                }
+                fb-notes-view .nv-empty-state {
+                    flex: 1;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    color: var(--text-muted);
+                    gap: 12px;
+                }
+                fb-notes-view .nv-empty-state fb-icon {
+                    --icon-size: 72px;
+                    opacity: 0.2;
+                }
+                fb-notes-view .nv-empty-state p {
+                    margin: 0;
+                    font-size: 14px;
+                }
+                fb-notes-view .nv-title-input {
+                    width: 100%;
+                    font-family: 'Outfit', sans-serif;
+                    font-weight: 800;
+                    font-size: 1.75rem;
+                    letter-spacing: -0.02em;
+                    background: none;
+                    border: none;
+                    color: var(--text);
+                    outline: none;
+                    margin-bottom: 14px;
+                    padding: 0;
+                }
+                fb-notes-view .nv-title-input::placeholder {
+                    color: var(--text-muted);
+                    opacity: 0.4;
+                }
+                fb-notes-view .nv-content-input {
+                    flex: 1;
+                    width: 100%;
+                    min-height: 300px;
+                    background: none;
+                    border: none;
+                    color: var(--text);
+                    font-family: inherit;
+                    font-size: 15px;
+                    line-height: 1.6;
+                    outline: none;
+                    resize: none;
+                    padding: 0;
+                }
+                fb-notes-view .nv-content-input::placeholder {
+                    color: var(--text-muted);
+                    opacity: 0.4;
+                }
+            </style>
+
+            <div class="nv-layout">
+                <aside class="nv-list-pane">
+                    <div class="nv-search">
+                        <fb-icon name="search"></fb-icon>
+                        <input type="search" id="search-input" placeholder="Search all notes"/>
+                    </div>
+                    <div class="nv-list-header">
+                        <span class="nv-list-title" id="list-title">All Notes</span>
+                        <button class="nv-icon-btn" id="toggle-archived-btn" title="Show archived">
+                            <fb-icon name="archive"></fb-icon>
                         </button>
-                    </fb-section>
+                        <button class="nv-icon-btn" id="new-btn" title="New note">
+                            <fb-icon name="plus"></fb-icon>
+                        </button>
+                    </div>
+                    <div class="nv-items" id="note-list"></div>
                 </aside>
-                <div class="tool-main">
-                    <div class="list-pane" style="width:320px; border-right:1px solid var(--border); overflow-y:auto;">
-                        <div id="note-list"></div>
-                    </div>
-                    <div class="editor-pane" style="flex:1; padding:2rem; overflow-y:auto;">
-                        <div id="editor-empty" class="empty-state" style="color:var(--text-muted); text-align:center; margin-top:4rem;">
-                            <fb-icon name="note" style="--icon-size: 64px;"></fb-icon>
-                            <p>Select a note to start writing.</p>
+
+                <main class="nv-editor-pane">
+                    <div class="nv-editor-header">
+                        <div class="nv-editor-actions">
+                            <button class="nv-icon-btn" id="delete-btn" title="Delete note" hidden>
+                                <fb-icon name="trash"></fb-icon>
+                            </button>
+                            <button class="nv-icon-btn" id="pin-btn" title="Pin to top" hidden>
+                                <fb-icon name="pin"></fb-icon>
+                            </button>
                         </div>
-                        <div id="editor" style="display:none;">
-                            <input id="title" class="title-input" placeholder="Note title" style="width:100%; background:none; border:none; color:var(--text); font-size:1.5rem; font-family:'Outfit'; font-weight:700; margin-bottom:1rem; outline:none;"/>
-                            <textarea id="content" placeholder="Start writing..." style="width:100%; height:calc(100vh - 260px); background:none; border:1px solid var(--border); border-radius:8px; padding:1rem; color:var(--text); font-family:inherit; resize:vertical; outline:none;"></textarea>
-                            <div style="display:flex; justify-content:flex-end; margin-top:1rem;">
-                                <button class="btn danger" id="delete-btn">
-                                    <fb-icon name="trash"></fb-icon> Delete
-                                </button>
-                            </div>
+                        <div class="nv-editor-timestamp" id="timestamp"></div>
+                        <div></div>
+                    </div>
+                    <div class="nv-editor-body">
+                        <div class="nv-empty-state" id="editor-empty">
+                            <fb-icon name="note"></fb-icon>
+                            <p>Select a note to start writing</p>
+                        </div>
+                        <div id="editor" hidden style="flex:1; display:flex; flex-direction:column;">
+                            <input id="title" class="nv-title-input" placeholder="Untitled"/>
+                            <textarea id="content" class="nv-content-input" placeholder="Start writing..."></textarea>
                         </div>
                     </div>
-                </div>
+                </main>
             </div>
         `;
+        this.attachHandlers();
+    }
 
+    attachHandlers() {
         this.querySelector("#new-btn").addEventListener("click", () => this.createNote());
-        this.querySelector("#filter-pinned").addEventListener("change", (e) => {
-            this.filters.pinned = e.detail;
+        this.querySelector("#toggle-archived-btn").addEventListener("click", () => {
+            this.showArchived = !this.showArchived;
+            this.querySelector("#toggle-archived-btn").classList.toggle("active", this.showArchived);
+            this.querySelector("#list-title").textContent = this.showArchived ? "All + Archived" : "All Notes";
             this.renderList();
         });
-        this.querySelector("#filter-archived").addEventListener("change", (e) => {
-            this.filters.archived = e.detail;
+        this.querySelector("#search-input").addEventListener("input", (e) => {
+            this.searchQuery = e.target.value.trim().toLowerCase();
             this.renderList();
         });
-
-        const title = this.querySelector("#title");
-        const content = this.querySelector("#content");
-        title.addEventListener("blur",   () => this.saveSelected());
-        content.addEventListener("blur", () => this.saveSelected());
-
+        this.querySelector("#title").addEventListener("blur",   () => this.saveSelected());
+        this.querySelector("#content").addEventListener("blur", () => this.saveSelected());
         this.querySelector("#delete-btn").addEventListener("click", () => this.deleteSelected());
+        this.querySelector("#pin-btn").addEventListener("click",    () => this.togglePinned());
     }
 
     renderList() {
         const filtered = this.notes.filter(n => {
-            if (this.filters.pinned && !n.pinned) return false;
-            if (!this.filters.archived && n.archived) return false;
+            if (!this.showArchived && n.archived) return false;
+            if (this.searchQuery) {
+                const haystack = ((n.title || "") + " " + (n.content || "")).toLowerCase();
+                if (!haystack.includes(this.searchQuery)) return false;
+            }
             return true;
         });
 
-        const list = this.querySelector("#note-list");
-        list.innerHTML = filtered.map(n => `
-            <div class="note-item" data-id="${n.id}" style="
-                padding: 0.75rem 1rem;
-                border-bottom: 1px solid var(--border);
-                cursor: pointer;
-                ${n.id === this.selectedId ? "background: rgba(59,130,246,0.1);" : ""}
-            ">
-                <div style="font-weight:600; font-size:0.95rem;">${escapeHtml(n.title || "(untitled)")}</div>
-                <div style="color:var(--text-muted); font-size:0.8rem; margin-top:0.25rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                    ${escapeHtml((n.content || "").slice(0, 80))}
-                </div>
-            </div>
-        `).join("");
+        // Sort: pinned first, then most-recently-updated.
+        filtered.sort((a, b) => {
+            if (a.pinned && !b.pinned) return -1;
+            if (!a.pinned && b.pinned) return 1;
+            return new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0);
+        });
 
-        list.querySelectorAll(".note-item").forEach(el => {
+        const list = this.querySelector("#note-list");
+        if (filtered.length === 0) {
+            list.innerHTML = `<div class="nv-empty-list">No notes. Click + to create one.</div>`;
+            return;
+        }
+
+        list.innerHTML = filtered.map(n => {
+            const snippet = (n.content || "").replace(/\s+/g, " ").slice(0, 80);
+            const date = this.formatDate(n.updatedAt);
+            const isSelected = n.id === this.selectedId;
+            return `
+                <div class="nv-item ${isSelected ? "selected" : ""}" data-id="${n.id}">
+                    <div class="nv-item-title-row">
+                        <span class="nv-item-title">${escapeHtml(n.title || "Untitled")}</span>
+                        ${n.pinned ? `<fb-icon name="pin"></fb-icon>` : ""}
+                    </div>
+                    <div class="nv-item-preview">
+                        <span class="nv-item-date">${date}</span>
+                        <span class="nv-item-snippet">${escapeHtml(snippet || "No additional text")}</span>
+                    </div>
+                </div>
+            `;
+        }).join("");
+
+        list.querySelectorAll(".nv-item").forEach(el => {
             el.addEventListener("click", () => this.select(el.dataset.id));
         });
     }
@@ -114,11 +393,24 @@ class FbNotesView extends HTMLElement {
         this.selectedId = id;
         const note = this.notes.find(n => n.id === id);
         if (!note) return;
-        this.querySelector("#editor-empty").style.display = "none";
-        this.querySelector("#editor").style.display = "block";
+        this.querySelector("#editor-empty").hidden = true;
+        this.querySelector("#editor").hidden = false;
+        this.querySelector("#delete-btn").hidden = false;
+        this.querySelector("#pin-btn").hidden = false;
         this.querySelector("#title").value   = note.title   || "";
         this.querySelector("#content").value = note.content || "";
+        this.querySelector("#timestamp").textContent = this.formatFullTimestamp(note.updatedAt);
+        this.querySelector("#pin-btn").classList.toggle("active", !!note.pinned);
         this.renderList();
+    }
+
+    clearSelection() {
+        this.selectedId = null;
+        this.querySelector("#editor-empty").hidden = false;
+        this.querySelector("#editor").hidden = true;
+        this.querySelector("#delete-btn").hidden = true;
+        this.querySelector("#pin-btn").hidden = true;
+        this.querySelector("#timestamp").textContent = "";
     }
 
     async saveSelected() {
@@ -132,16 +424,32 @@ class FbNotesView extends HTMLElement {
         note.content = newContent;
         try {
             await fb.api.notes.update(note.id, note);
+            note.updatedAt = new Date().toISOString();
+            this.querySelector("#timestamp").textContent = this.formatFullTimestamp(note.updatedAt);
             this.renderList();
         } catch (err) {
             console.error("[fb-notes-view] update failed:", err);
         }
     }
 
+    async togglePinned() {
+        if (!this.selectedId) return;
+        const note = this.notes.find(n => n.id === this.selectedId);
+        if (!note) return;
+        note.pinned = !note.pinned;
+        try {
+            await fb.api.notes.update(note.id, note);
+            this.querySelector("#pin-btn").classList.toggle("active", note.pinned);
+            this.renderList();
+        } catch (err) {
+            console.error("[fb-notes-view] pin toggle failed:", err);
+            note.pinned = !note.pinned; // revert optimistic change
+        }
+    }
+
     async createNote() {
         try {
-            const created = await fb.api.notes.create({ title: "New note", content: "" });
-            // The server returns the note with its ID populated.
+            const created = await fb.api.notes.create({ title: "", content: "" });
             this.notes.unshift(created);
             this.selectedId = created.id;
             this.renderList();
@@ -159,13 +467,33 @@ class FbNotesView extends HTMLElement {
         try {
             await fb.api.notes.delete(id);
             this.notes = this.notes.filter(n => n.id !== id);
-            this.selectedId = null;
-            this.querySelector("#editor-empty").style.display = "block";
-            this.querySelector("#editor").style.display = "none";
+            this.clearSelection();
             this.renderList();
         } catch (err) {
             console.error("[fb-notes-view] delete failed:", err);
         }
+    }
+
+    formatDate(iso) {
+        if (!iso) return "";
+        const d = new Date(iso);
+        const now = new Date();
+        const sameDay = d.toDateString() === now.toDateString();
+        const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+        const isYesterday = d.toDateString() === yesterday.toDateString();
+        const sameYear = d.getFullYear() === now.getFullYear();
+        if (sameDay)     return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+        if (isYesterday) return "Yesterday";
+        if (sameYear)    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+        return d.toLocaleDateString(undefined, { year: "2-digit", month: "numeric", day: "numeric" });
+    }
+
+    formatFullTimestamp(iso) {
+        if (!iso) return "";
+        const d = new Date(iso);
+        return d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })
+             + " at "
+             + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
     }
 }
 
