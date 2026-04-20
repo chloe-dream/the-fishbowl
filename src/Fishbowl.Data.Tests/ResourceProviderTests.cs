@@ -132,8 +132,8 @@ public class ResourceProviderTests : IDisposable
         );
 
         // Act
-        // 'css/index.css' is embedded in Fishbowl.Data
-        var resource = await provider.GetAsync("css/index.css", TestContext.Current.CancellationToken);
+        // 'css/app.css' is embedded in Fishbowl.Data
+        var resource = await provider.GetAsync("css/app.css", TestContext.Current.CancellationToken);
 
         // Assert
         Assert.NotNull(resource);
@@ -152,7 +152,7 @@ public class ResourceProviderTests : IDisposable
 
         // Act
         // Even if requested with backslash, it should resolve (important for Windows paths)
-        var resource = await provider.GetAsync(@"css\index.css", TestContext.Current.CancellationToken);
+        var resource = await provider.GetAsync(@"css\app.css", TestContext.Current.CancellationToken);
 
         // Assert
         Assert.NotNull(resource);
@@ -167,7 +167,7 @@ public class ResourceProviderTests : IDisposable
             modsPath: _tempModsDir,
             embeddedAssembly: typeof(ResourceProvider).Assembly);
 
-        var exists = await provider.ExistsAsync("css/index.css", TestContext.Current.CancellationToken);
+        var exists = await provider.ExistsAsync("css/app.css", TestContext.Current.CancellationToken);
 
         Assert.True(exists, "ExistsAsync must find embedded subfolder resources (forward slash).");
     }
@@ -180,7 +180,7 @@ public class ResourceProviderTests : IDisposable
             modsPath: _tempModsDir,
             embeddedAssembly: typeof(ResourceProvider).Assembly);
 
-        var exists = await provider.ExistsAsync(@"css\index.css", TestContext.Current.CancellationToken);
+        var exists = await provider.ExistsAsync(@"css\app.css", TestContext.Current.CancellationToken);
 
         Assert.True(exists, "ExistsAsync must find embedded subfolder resources (backslash).");
     }
