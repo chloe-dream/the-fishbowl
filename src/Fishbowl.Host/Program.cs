@@ -107,7 +107,10 @@ authBuilder.AddGoogle(options =>
     };
 });
 
-// Configuration snapshot populated before the server starts listening
+// Configuration snapshot populated before the server starts listening.
+// Skipped in Testing: the initializer is a singleton hosted service that
+// depends on ISystemRepository (scoped), which trips DI validation in
+// test environments. Auth tests manually populate the cache instead.
 builder.Services.AddSingleton<Fishbowl.Host.Configuration.ConfigurationCache>();
 if (!builder.Environment.IsEnvironment("Testing"))
 {
@@ -137,9 +140,15 @@ if (!app.Environment.IsDevelopment())
 }
 app.UseHttpsRedirection();
 
-// For Playwright testing, inject a test user BEFORE auth runs
-if (app.Environment.IsEnvironment("Testing") && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FISHBOWL_PLAYWRIGHT_TEST")))
+// Playwright smoke-test auth bypass. Injects a test user so the browser-driven
+// test can touch authenticated routes without a real Google OAuth dance.
+// Double-gated: requires ASPNETCORE_ENVIRONMENT=Testing AND the env var below.
+// Enabled by Fishbowl.Ui.Tests/PlaywrightFixture.cs — never set this env var
+// anywhere else.
+if (app.Environment.IsEnvironment("Testing")
+    && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FISHBOWL_PLAYWRIGHT_TEST")))
 {
+    app.Logger.LogWarning("Playwright test-auth middleware ACTIVE. This must only happen in Fishbowl.Ui.Tests.");
     app.Use(async (context, next) =>
     {
         var identity = new ClaimsIdentity(CookieAuthenticationDefaults.AuthenticationScheme);
