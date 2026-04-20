@@ -265,6 +265,15 @@ input, textarea {
     height: 40px;
     margin: 0 auto 1rem;
 }
+/* Login screen uses the full fishbowl illustration instead of the pill —
+   bigger canvas + room for the goldfish, water, bubbles, glass highlight. */
+.auth-card .fb-fishbowl {
+    display: block;
+    width: 88px;
+    height: 88px;
+    margin: 0 auto 1.25rem;
+    filter: drop-shadow(0 8px 20px rgba(59, 130, 246, 0.28));
+}
 .auth-card h1 {
     font-family: 'Outfit', sans-serif;
     font-size: 2rem;
