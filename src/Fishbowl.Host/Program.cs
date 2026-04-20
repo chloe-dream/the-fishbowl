@@ -108,14 +108,8 @@ authBuilder.AddGoogle(options =>
 });
 
 // Configuration snapshot populated before the server starts listening.
-// Skipped in Testing: the initializer is a singleton hosted service that
-// depends on ISystemRepository (scoped), which trips DI validation in
-// test environments. Auth tests manually populate the cache instead.
 builder.Services.AddSingleton<Fishbowl.Host.Configuration.ConfigurationCache>();
-if (!builder.Environment.IsEnvironment("Testing"))
-{
-    builder.Services.AddHostedService<Fishbowl.Host.Configuration.ConfigurationInitializer>();
-}
+builder.Services.AddHostedService<Fishbowl.Host.Configuration.ConfigurationInitializer>();
 
 // Google OAuth options bind from the cache (populated by the hosted service).
 // Auth middleware resolves via IOptionsMonitor<GoogleOptions> which re-runs this
