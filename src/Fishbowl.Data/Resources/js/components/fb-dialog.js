@@ -95,7 +95,13 @@ class FbDialog extends HTMLElement {
         this._armTimer = setTimeout(() => {
             this._armTimer = null;
             const btn = this.shadowRoot.querySelectorAll(".btn")[armed];
-            if (btn) btn.focus();
+            if (!btn) return;
+            // .armed class gives the explicit visual cue — :focus-visible
+            // won't fire reliably for programmatic focus (Chrome's heuristic
+            // hides the ring when focus is set by script without a prior
+            // keyboard event).
+            btn.classList.add("armed");
+            btn.focus();
         }, ms);
     }
 
@@ -174,20 +180,23 @@ class FbDialog extends HTMLElement {
                     padding: 12px 20px 20px;
                 }
 
+                /* Shared language for all three kinds: subtle tinted bg,
+                   colored text, matching-color border on hover. The only
+                   difference between kinds is the accent hue. */
                 .btn {
                     font: 600 0.85rem 'Inter', sans-serif;
-                    padding: 8px 14px;
+                    padding: 8px 16px;
                     border-radius: 8px;
                     cursor: pointer;
                     border: 1px solid transparent;
-                    background: transparent;
-                    color: var(--text-muted, #94a3b8);
-                    transition: background 120ms, color 120ms, border-color 120ms;
+                    background: rgba(255, 255, 255, 0.06);
+                    color: var(--text, #f8fafc);
+                    transition: background 120ms, color 120ms, border-color 120ms, box-shadow 120ms;
                     outline: none;
                 }
                 .btn:hover {
-                    background: rgba(255, 255, 255, 0.06);
-                    color: var(--text, #f8fafc);
+                    background: rgba(255, 255, 255, 0.14);
+                    border-color: rgba(255, 255, 255, 0.18);
                 }
                 .btn:focus-visible {
                     outline: 2px solid var(--accent, #3b82f6);
@@ -195,23 +204,38 @@ class FbDialog extends HTMLElement {
                 }
 
                 .btn.primary {
-                    background: var(--accent, #3b82f6);
-                    color: #fff;
+                    background: rgba(59, 130, 246, 0.18);
+                    color: var(--accent, #3b82f6);
+                    border-color: rgba(59, 130, 246, 0.35);
                 }
                 .btn.primary:hover {
-                    background: color-mix(in srgb, var(--accent, #3b82f6) 88%, white);
+                    background: rgba(59, 130, 246, 0.32);
+                    color: #fff;
+                    border-color: var(--accent, #3b82f6);
                 }
 
                 .btn.destructive {
+                    background: rgba(239, 68, 68, 0.12);
                     color: var(--danger, #ef4444);
-                    border-color: var(--danger, #ef4444);
+                    border-color: rgba(239, 68, 68, 0.3);
                 }
                 .btn.destructive:hover {
-                    background: var(--danger, #ef4444);
+                    background: rgba(239, 68, 68, 0.26);
                     color: #fff;
+                    border-color: var(--danger, #ef4444);
                 }
                 .btn.destructive:focus-visible {
                     outline-color: var(--danger, #ef4444);
+                }
+
+                /* .armed is added by the arming timer so the destructive
+                   button has an unmistakable cue independent of
+                   :focus-visible (which JS focus can't reliably trigger). */
+                .btn.armed {
+                    background: rgba(239, 68, 68, 0.26);
+                    color: #fff;
+                    border-color: var(--danger, #ef4444);
+                    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.28);
                 }
 
                 @keyframes fade-in {
