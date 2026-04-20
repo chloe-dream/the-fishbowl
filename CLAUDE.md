@@ -89,6 +89,20 @@ Once `Google:ClientId` is present in the cache, both `GET /setup` and `POST /api
 
 `Fishbowl.Host.Plugins.PluginLoadContext` uses `AssemblyDependencyResolver` inside a collectible ALC so plugin DLLs in `fishbowl-mods/plugins/` can ship their own dependency versions without colliding with the host. Plugins implement `IFishbowlPlugin` and register capabilities through `IFishbowlApi.AddBotClient / AddSyncProvider / AddScheduledJob` — contracts live in `Fishbowl.Core.Plugins`. `Fishbowl.Host.Plugins.PluginLoader.LoadPlugins(...)` runs at startup (configurable path via `Plugins:Path`, default `fishbowl-mods/plugins`); plugin load failures are logged and skipped — one bad plugin doesn't kill the host.
 
+### UI is a single-page app with hash router
+
+The frontend is pure Vanilla JS + Web Components (no framework, no build step). `index.html` is the SPA shell; views mount into `#app-root`. `fb.router.register("#/path", "tag-name", { label, icon })` wires a view; `fb.router.mount("#app-root")` starts the router. **Views use light DOM** (so `app.css` classes apply); **components use Shadow DOM** (for style isolation). Theme tokens at `:root` in `app.css` bleed through via CSS custom properties (`var(--accent)`, `var(--accent-warm)`, `var(--danger)` — plus `--glass`, `--border`, `--text-muted`).
+
+Login and setup stay server-rendered at `/login` and `/setup` — they're pre-auth and don't participate in the SPA routing.
+
+System components are prefixed `fb-`; mods go in `fishbowl-mods/components/` with `usr_` prefix (CONCEPT.md rule). `IResourceProvider` already handles disk override of any `fb-*.js` file. `fb.icons.register(name, pathString)` lets mods extend the icon dictionary at runtime without overriding `icons.js`.
+
+Twelve components shipped: `fb-icon`, `fb-footer`, `fb-nav`, `fb-section`, `fb-toggle`, `fb-segmented-control`, `fb-window`, `fb-slider`, `fb-hud`, `fb-log`, `fb-terminal`, `fb-loader`. Full spec: `docs/superpowers/specs/2026-04-19-ui-foundation-design.md`. Manual test checklist: `docs/ui-manual-test-checklist.md`.
+
+### UI smoke test uses a real subprocess
+
+`Fishbowl.Ui.Tests` launches `Fishbowl.Host` as a subprocess on a free loopback port (not `TestServer`) so Playwright can hit real HTTP. A gated bypass in `Program.cs` (`FISHBOWL_PLAYWRIGHT_TEST` env var + `Testing` environment) injects a test user so the smoke test can touch authenticated routes without a real OAuth flow. **Never set `FISHBOWL_PLAYWRIGHT_TEST` outside the Ui.Tests fixture.**
+
 ## Testing conventions
 
 - Integration tests use `WebApplicationFactory<Program>` — this requires `Program.cs` to end with `public partial class Program { }` so the test project can reference it. Leave that line in place.
@@ -102,6 +116,7 @@ Once `Google:ClientId` is present in the cache, both `GET /setup` and `POST /api
 - **Multi-step writes use the transaction helper.** `_dbFactory.WithUserTransactionAsync(userId, async (db, tx, ct) => { ... })` wraps begin/commit/rollback. `NoteRepository.CreateAsync/UpdateAsync/DeleteAsync` use it for `notes` + `notes_fts` syncing — copy that pattern for any repo that touches more than one table.
 - **FTS5 writes must stay in sync with the primary table.** `notes_fts.rowid` maps to `notes.rowid` via `(SELECT rowid FROM notes WHERE id = @Id)`. On delete, remove from `notes_fts` BEFORE `notes` (else the subquery returns nothing). Tags in `notes_fts` are a space-joined flat string (not JSON).
 - **Logging via `ILogger<T>`.** Every service that does non-trivial work takes an optional `ILogger<T>? logger = null` parameter defaulting to `NullLogger<T>.Instance`, so tests that construct objects directly still work. DI auto-injects the real logger in production. **Never log PII (email, name, content, secret values, OAuth tokens).**
+- **`fb.api` for all frontend backend calls.** Views call `fb.api.notes.list()` / `.create()` / `.update()` / `.delete()`. 401s redirect to `/login` automatically. Don't call `fetch` directly from views or components.
 - SQLite `DateTime` is stored as ISO-8601 strings (`DateTime.UtcNow.ToString("o")`). Booleans as `INTEGER DEFAULT 0/1` (Dapper handles int↔bool natively via `Convert.ToBoolean`). IDs are ULIDs (`Ulid.NewUlid().ToString()`).
 - Secrets in notes use a `::secret` markdown block and a separate `content_secret BLOB` column encrypted client-side. **Never include secret content in FTS indexing, embeddings, or chat responses** — non-negotiable product rule from CONCEPT.md.
 - "If the file exists on disk, use it; otherwise use the default" — the override pattern from CONCEPT.md "Modding" applies uniformly to components, styles, scripts, templates, and plugins. Do not introduce registration manifests or whitelists for mods.
