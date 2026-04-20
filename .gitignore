@@ -480,3 +480,32 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# ==============================================================================
+# Fishbowl project-specific
+# ==============================================================================
+
+# Runtime data — per-user SQLite files. Never track.
+# Covers both the repo-root location and any src/Fishbowl.Host/fishbowl-data/
+# that appears when running from that directory.
+fishbowl-data/
+**/fishbowl-data/
+
+# User-dropped mods. Dir may exist during dev but its contents are end-user
+# artifacts — anything committed belongs in src/Fishbowl.Data/Resources/ instead.
+fishbowl-mods/
+**/fishbowl-mods/
+
+# Claude Code per-machine config (settings.local.json lives here)
+.claude/
+
+# Test output and coverage artifacts
+test_output.txt
+TestResults/
+**/TestResults/
+*.trx
+coverage.cobertura.xml
+**/coverage.cobertura.xml
+
+# Playwright browser cache (only if anyone overrides the default cache dir)
+.playwright/
