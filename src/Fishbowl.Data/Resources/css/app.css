@@ -18,6 +18,27 @@
     --bg-dark:      #000000;
 }
 
+/* Modern themed scrollbars — global.
+   Note: this `*` selector does NOT pierce Shadow DOM; components with their
+   own scrollable areas inside shadow roots must duplicate these rules. */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.18);
+    background-clip: content-box;
+    border: 2px solid transparent;
+    border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.32);
+    background-clip: content-box;
+}
+*::-webkit-scrollbar-corner { background: transparent; }
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -188,20 +209,8 @@ input, textarea {
     overflow: hidden;
 }
 
-/* Custom scrollbar (for sidebars and list panes) */
-.tool-sidebar::-webkit-scrollbar,
-.list-pane::-webkit-scrollbar {
-    width: 6px;
-}
-.tool-sidebar::-webkit-scrollbar-thumb,
-.list-pane::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 3px;
-}
-.tool-sidebar::-webkit-scrollbar-thumb:hover,
-.list-pane::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.2);
-}
+/* Scrollbars are themed globally at the top of this file; per-element
+   webkit rules were previously duplicated here — no longer needed. */
 
 /* Base button classes (used inside Shadow DOM too via :host-context support) */
 .btn {

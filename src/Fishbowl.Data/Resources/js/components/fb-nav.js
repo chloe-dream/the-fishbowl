@@ -23,12 +23,43 @@ class FbNav extends HTMLElement {
     connectedCallback() {
         this.render();
         this.attachPersistentHandlers();
+        // Register as the fb.toolbar renderer + render any items already set.
+        if (window.fb?.toolbar) {
+            fb.toolbar._nav = this;
+            this.renderToolbar();
+        }
     }
 
     disconnectedCallback() {
         if (this._escHandler)   document.removeEventListener("keydown", this._escHandler);
         if (this._hashHandler)  window.removeEventListener("hashchange", this._hashHandler);
         if (this._routeHandler) window.removeEventListener("fb:route-registered", this._routeHandler);
+        if (window.fb?.toolbar?._nav === this) fb.toolbar._nav = null;
+    }
+
+    /**
+     * Rewrites the .toolbar container's children from fb.toolbar._items.
+     * Called by fb.toolbar.set() and on connect. Keeps the Shadow DOM
+     * scoped; no light-DOM manipulation needed.
+     */
+    renderToolbar() {
+        const container = this.shadowRoot.querySelector(".toolbar");
+        if (!container) return;
+        const items = (window.fb?.toolbar?._items) || [];
+        container.innerHTML = items.map((item, i) => `
+            <button class="toolbar-btn ${item.active ? "active" : ""}"
+                    data-idx="${i}"
+                    title="${(item.title || "").replace(/"/g, "&quot;")}">
+                <fb-icon name="${item.icon}"></fb-icon>
+            </button>
+        `).join("");
+        container.querySelectorAll("button[data-idx]").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const idx = parseInt(btn.dataset.idx, 10);
+                const item = (window.fb?.toolbar?._items || [])[idx];
+                item?.onClick?.();
+            });
+        });
     }
 
     render() {
@@ -88,7 +119,27 @@ class FbNav extends HTMLElement {
                 .brand .sep { color: rgba(255,255,255,0.3); }
                 .brand .app-name { color: var(--accent); }
                 .spacer { flex: 1; }
-                .toolbar { display: flex; gap: 0.5rem; }
+                .toolbar { display: flex; gap: 0.25rem; align-items: center; }
+                .toolbar-btn {
+                    background: none;
+                    border: none;
+                    color: #cbd5e1;
+                    padding: 5px 7px;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    display: inline-flex;
+                    align-items: center;
+                    transition: background 0.15s, color 0.15s;
+                }
+                .toolbar-btn:hover {
+                    background: rgba(255, 255, 255, 0.08);
+                    color: #f8fafc;
+                }
+                .toolbar-btn.active {
+                    background: rgba(59, 130, 246, 0.18);
+                    color: var(--accent);
+                }
+                .toolbar-btn fb-icon { --icon-size: 18px; }
 
                 .backdrop {
                     position: fixed;
@@ -145,6 +196,21 @@ class FbNav extends HTMLElement {
                     color: #64748b;
                     font-size: 0.85rem;
                     font-style: italic;
+                }
+
+                /* Scrollbar theme — duplicated here because the global rule
+                   in app.css doesn't pierce Shadow DOM. */
+                ::-webkit-scrollbar { width: 10px; height: 10px; }
+                ::-webkit-scrollbar-track { background: transparent; }
+                ::-webkit-scrollbar-thumb {
+                    background: rgba(255, 255, 255, 0.18);
+                    background-clip: content-box;
+                    border: 2px solid transparent;
+                    border-radius: 8px;
+                }
+                ::-webkit-scrollbar-thumb:hover {
+                    background: rgba(255, 255, 255, 0.32);
+                    background-clip: content-box;
                 }
             </style>
             <nav class="ribbon">

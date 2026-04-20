@@ -27,6 +27,11 @@ class FbNotesView extends HTMLElement {
         await this.loadNotes();
     }
 
+    disconnectedCallback() {
+        // Router already clears on swap, but guard against any other unmount.
+        if (window.fb?.toolbar) fb.toolbar.clear();
+    }
+
     async loadNotes() {
         try {
             this.notes = await fb.api.notes.list();
@@ -128,11 +133,6 @@ class FbNotesView extends HTMLElement {
                     overflow-y: auto;
                     padding: 2px 8px 12px;
                 }
-                fb-notes-view .nv-items::-webkit-scrollbar { width: 6px; }
-                fb-notes-view .nv-items::-webkit-scrollbar-thumb {
-                    background: rgba(255, 255, 255, 0.1);
-                    border-radius: 3px;
-                }
 
                 fb-notes-view .nv-item {
                     padding: 10px 12px;
@@ -144,8 +144,8 @@ class FbNotesView extends HTMLElement {
                 }
                 fb-notes-view .nv-item:hover { background: rgba(255, 255, 255, 0.04); }
                 fb-notes-view .nv-item.selected {
-                    background: rgba(249, 115, 22, 0.15);
-                    border-color: rgba(249, 115, 22, 0.35);
+                    background: rgba(59, 130, 246, 0.12);
+                    border-color: rgba(59, 130, 246, 0.28);
                 }
                 fb-notes-view .nv-item-title-row {
                     display: flex;
@@ -199,25 +199,26 @@ class FbNotesView extends HTMLElement {
                     flex-direction: column;
                     min-width: 0;
                 }
-                fb-notes-view .nv-editor-header {
-                    display: grid;
-                    grid-template-columns: 1fr auto 1fr;
-                    align-items: center;
-                    padding: 10px 20px;
-                    min-height: 44px;
-                    border-bottom: 1px solid var(--border);
-                    gap: 8px;
-                }
-                fb-notes-view .nv-editor-actions {
+                fb-notes-view .nv-editor-footer {
                     display: flex;
-                    gap: 4px;
-                    justify-self: start;
-                }
-                fb-notes-view .nv-editor-timestamp {
+                    align-items: center;
+                    gap: 12px;
+                    min-height: 32px;
+                    padding: 8px 20px;
+                    border-top: 1px solid var(--border);
+                    background: var(--panel);
                     font-size: 11px;
                     color: var(--text-muted);
-                    text-align: center;
-                    letter-spacing: 0.02em;
+                    flex-shrink: 0;
+                }
+                fb-notes-view .nv-editor-footer-spacer { flex: 1; }
+                fb-notes-view .nv-editor-footer #timestamp {
+                    font-variant-numeric: tabular-nums;
+                }
+                fb-notes-view .nv-editor-tags {
+                    display: flex;
+                    gap: 6px;
+                    /* Tag chips land here in a future change. */
                 }
                 fb-notes-view .nv-editor-body {
                     flex: 1;
@@ -304,18 +305,6 @@ class FbNotesView extends HTMLElement {
                 </aside>
 
                 <main class="nv-editor-pane">
-                    <div class="nv-editor-header">
-                        <div class="nv-editor-actions">
-                            <button class="nv-icon-btn" id="delete-btn" title="Delete note" hidden>
-                                <fb-icon name="trash"></fb-icon>
-                            </button>
-                            <button class="nv-icon-btn" id="pin-btn" title="Pin to top" hidden>
-                                <fb-icon name="pin"></fb-icon>
-                            </button>
-                        </div>
-                        <div class="nv-editor-timestamp" id="timestamp"></div>
-                        <div></div>
-                    </div>
                     <div class="nv-editor-body">
                         <div class="nv-empty-state" id="editor-empty">
                             <fb-icon name="note"></fb-icon>
@@ -326,6 +315,15 @@ class FbNotesView extends HTMLElement {
                             <textarea id="content" class="nv-content-input" placeholder="Start writing..."></textarea>
                         </div>
                     </div>
+                    <footer class="nv-editor-footer" id="editor-footer" hidden>
+                        <span class="nv-editor-footer-meta">
+                            Updated <span id="timestamp"></span>
+                        </span>
+                        <div class="nv-editor-footer-spacer"></div>
+                        <div class="nv-editor-tags" id="tags">
+                            <!-- Tag chips land here in a future change. -->
+                        </div>
+                    </footer>
                 </main>
             </div>
         `;
@@ -346,8 +344,28 @@ class FbNotesView extends HTMLElement {
         });
         this.querySelector("#title").addEventListener("blur",   () => this.saveSelected());
         this.querySelector("#content").addEventListener("blur", () => this.saveSelected());
-        this.querySelector("#delete-btn").addEventListener("click", () => this.deleteSelected());
-        this.querySelector("#pin-btn").addEventListener("click",    () => this.togglePinned());
+        // Pin + trash actions live in fb-nav's toolbar now; see updateToolbar().
+    }
+
+    /**
+     * Publish per-note actions to the global fb-nav toolbar. Called whenever
+     * a note becomes the active selection, or when the active note's pinned
+     * state changes.
+     */
+    updateToolbar(note) {
+        fb.toolbar.set([
+            {
+                icon:    "pin",
+                title:   note.pinned ? "Unpin" : "Pin to top",
+                active:  !!note.pinned,
+                onClick: () => this.togglePinned()
+            },
+            {
+                icon:    "trash",
+                title:   "Delete note",
+                onClick: () => this.deleteSelected()
+            }
+        ]);
     }
 
     renderList() {
@@ -400,24 +418,23 @@ class FbNotesView extends HTMLElement {
         this.selectedId = id;
         const note = this.notes.find(n => n.id === id);
         if (!note) return;
-        this.querySelector("#editor-empty").hidden = true;
-        this.querySelector("#editor").hidden = false;
-        this.querySelector("#delete-btn").hidden = false;
-        this.querySelector("#pin-btn").hidden = false;
+        this.querySelector("#editor-empty").hidden  = true;
+        this.querySelector("#editor").hidden        = false;
+        this.querySelector("#editor-footer").hidden = false;
         this.querySelector("#title").value   = note.title   || "";
         this.querySelector("#content").value = note.content || "";
         this.querySelector("#timestamp").textContent = this.formatFullTimestamp(note.updatedAt);
-        this.querySelector("#pin-btn").classList.toggle("active", !!note.pinned);
+        this.updateToolbar(note);
         this.renderList();
     }
 
     clearSelection() {
         this.selectedId = null;
-        this.querySelector("#editor-empty").hidden = false;
-        this.querySelector("#editor").hidden = true;
-        this.querySelector("#delete-btn").hidden = true;
-        this.querySelector("#pin-btn").hidden = true;
+        this.querySelector("#editor-empty").hidden  = false;
+        this.querySelector("#editor").hidden        = true;
+        this.querySelector("#editor-footer").hidden = true;
         this.querySelector("#timestamp").textContent = "";
+        fb.toolbar.clear();
     }
 
     async saveSelected() {
@@ -446,7 +463,7 @@ class FbNotesView extends HTMLElement {
         note.pinned = !note.pinned;
         try {
             await fb.api.notes.update(note.id, note);
-            this.querySelector("#pin-btn").classList.toggle("active", note.pinned);
+            this.updateToolbar(note);  // reflect new pinned state in the nav button
             this.renderList();
         } catch (err) {
             console.error("[fb-notes-view] pin toggle failed:", err);

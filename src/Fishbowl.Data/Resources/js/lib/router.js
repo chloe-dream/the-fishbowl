@@ -13,6 +13,12 @@
 
     function render() {
         if (!rootElement) return;
+        // Clear any per-view toolbar items left over from the previous view.
+        // Views that need toolbar actions call fb.toolbar.set(...) in
+        // connectedCallback (or on selection change) — the outgoing view
+        // never needs to clean up explicitly.
+        if (window.fb?.toolbar) window.fb.toolbar.clear();
+
         const hash = currentHash();
         const entry = routes.get(hash) || routes.get("#/");
         if (!entry) { rootElement.innerHTML = ""; return; }
