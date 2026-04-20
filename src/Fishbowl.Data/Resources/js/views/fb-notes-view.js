@@ -40,6 +40,8 @@ class FbNotesView extends HTMLElement {
         this.innerHTML = `
             <style>
                 fb-notes-view { display: block; height: 100%; }
+                /* [hidden] must beat our scoped display rules */
+                fb-notes-view [hidden] { display: none !important; }
                 fb-notes-view .nv-layout {
                     display: flex;
                     height: calc(100vh - 50px);
@@ -276,6 +278,11 @@ class FbNotesView extends HTMLElement {
                     color: var(--text-muted);
                     opacity: 0.4;
                 }
+                fb-notes-view .nv-editor {
+                    flex: 1;
+                    display: flex;
+                    flex-direction: column;
+                }
             </style>
 
             <div class="nv-layout">
@@ -314,7 +321,7 @@ class FbNotesView extends HTMLElement {
                             <fb-icon name="note"></fb-icon>
                             <p>Select a note to start writing</p>
                         </div>
-                        <div id="editor" hidden style="flex:1; display:flex; flex-direction:column;">
+                        <div id="editor" class="nv-editor" hidden>
                             <input id="title" class="nv-title-input" placeholder="Untitled"/>
                             <textarea id="content" class="nv-content-input" placeholder="Start writing..."></textarea>
                         </div>
