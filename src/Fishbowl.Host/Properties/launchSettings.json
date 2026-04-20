@@ -9,6 +9,19 @@
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       }
+    },
+    "https (external console)": {
+      "commandName": "Executable",
+      "executablePath": "dotnet",
+      "commandLineArgs": "run --no-launch-profile --no-build --urls https://localhost:7180",
+      "workingDirectory": "$(ProjectDir)",
+      "useExternalConsole": true,
+      "launchBrowser": true,
+      "applicationUrl": "https://localhost:7180",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "DOTNET_ENVIRONMENT": "Development"
+      }
     }
   }
 }
