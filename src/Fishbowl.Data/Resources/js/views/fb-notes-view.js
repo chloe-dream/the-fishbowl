@@ -262,9 +262,16 @@ class FbNotesView extends HTMLElement {
                     opacity: 0.4;
                 }
                 fb-notes-view .nv-content-input {
-                    flex: 1;
+                    /* Auto-grows to fit content via JS; overflow:hidden disables
+                       the textarea's internal scrollbar so the outer .nv-editor-body
+                       becomes the scroll container. That places the scrollbar at
+                       the viewport's right edge, running full-height from nav
+                       bottom to the footer, and lets the global scrollbar theme
+                       apply (textarea internal scrollbars are rendered differently
+                       on some browsers and can't be reliably themed). */
+                    display: block;
                     width: 100%;
-                    min-height: 300px;
+                    min-height: 60vh;
                     background: none;
                     border: none;
                     color: var(--text);
@@ -274,15 +281,18 @@ class FbNotesView extends HTMLElement {
                     outline: none;
                     resize: none;
                     padding: 0;
+                    overflow: hidden;
                 }
                 fb-notes-view .nv-content-input::placeholder {
                     color: var(--text-muted);
                     opacity: 0.4;
                 }
                 fb-notes-view .nv-editor {
-                    flex: 1;
-                    display: flex;
-                    flex-direction: column;
+                    /* No flex:1/column here — we want content to stack normally
+                       and push the outer .nv-editor-body to scroll when it
+                       overflows, rather than forcing the textarea to scroll
+                       internally. */
+                    display: block;
                 }
             </style>
 
@@ -343,8 +353,18 @@ class FbNotesView extends HTMLElement {
             this.renderList();
         });
         this.querySelector("#title").addEventListener("blur",   () => this.saveSelected());
-        this.querySelector("#content").addEventListener("blur", () => this.saveSelected());
+        const contentEl = this.querySelector("#content");
+        contentEl.addEventListener("blur",  () => this.saveSelected());
+        contentEl.addEventListener("input", () => this.autosizeContent());
         // Pin + trash actions live in fb-nav's toolbar now; see updateToolbar().
+    }
+
+    /** Resize the textarea to fit its content so the outer editor body scrolls. */
+    autosizeContent() {
+        const el = this.querySelector("#content");
+        if (!el) return;
+        el.style.height = "auto";
+        el.style.height = el.scrollHeight + "px";
     }
 
     /**
@@ -425,6 +445,9 @@ class FbNotesView extends HTMLElement {
         this.querySelector("#content").value = note.content || "";
         this.querySelector("#timestamp").textContent = this.formatFullTimestamp(note.updatedAt);
         this.updateToolbar(note);
+        // Resize the textarea to its content after the value is set. Defer to
+        // the next frame so layout has caught up with the new value.
+        requestAnimationFrame(() => this.autosizeContent());
         this.renderList();
     }
 
