@@ -105,6 +105,17 @@ authBuilder.AddGoogle(options =>
         var identity = (ClaimsIdentity)context.Principal!.Identity!;
         identity.AddClaim(new Claim("fishbowl_user_id", internalUserId));
     };
+
+    // Log Google-side failures server-side so we can see the actual error
+    // (browser-side error URLs are opaque base64 blobs).
+    options.Events.OnRemoteFailure = context =>
+    {
+        var logger = context.HttpContext.RequestServices.GetService<ILoggerFactory>()?.CreateLogger("Auth");
+        logger?.LogError(context.Failure, "Google auth failed: {Message}", context.Failure?.Message);
+        context.Response.Redirect("/login?authError=" + Uri.EscapeDataString(context.Failure?.Message ?? "unknown"));
+        context.HandleResponse();
+        return Task.CompletedTask;
+    };
 });
 
 // Configuration snapshot populated before the server starts listening.
@@ -204,6 +215,33 @@ app.MapGet("/login/challenge/{provider}", (string provider, string? returnUrl) =
         properties: new AuthenticationProperties { RedirectUri = returnUrl ?? "/" },
         authenticationSchemes: new[] { scheme });
 });
+
+// Development-only: surface the exact OAuth values Fishbowl will send to Google
+// so they can be compared against Google Cloud Console. Returns partial secrets
+// (prefix + last 4 chars) so screenshots are safe to share.
+if (app.Environment.IsDevelopment())
+{
+    app.MapGet("/api/auth/debug", (HttpContext context, Fishbowl.Host.Configuration.ConfigurationCache cache) =>
+    {
+        var clientId = cache.Get("Google:ClientId") ?? "<null>";
+        var secret = cache.Get("Google:ClientSecret") ?? "<null>";
+        var redactedSecret = secret.Length >= 4
+            ? secret.Substring(0, Math.Min(7, secret.Length)) + "...****" + secret.Substring(secret.Length - 4)
+            : secret;
+
+        var request = context.Request;
+        var expectedRedirect = $"{request.Scheme}://{request.Host}/signin-google";
+
+        return Results.Ok(new
+        {
+            clientId,
+            clientSecret = redactedSecret,
+            expectedRedirectUri = expectedRedirect,
+            expectedJavaScriptOrigin = $"{request.Scheme}://{request.Host}",
+            hint = "Compare clientId + last-4 of secret + redirect URI against Google Cloud Console → Credentials."
+        });
+    });
+}
 
 app.MapGet("/api/auth/providers", (Fishbowl.Host.Configuration.ConfigurationCache cache) =>
 {
