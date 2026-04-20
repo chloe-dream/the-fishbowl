@@ -272,7 +272,8 @@ app.MapGet("/setup", async (HttpContext context, Fishbowl.Host.Configuration.Con
 app.MapPost("/api/setup", async (
     SetupRequest request,
     ISystemRepository repo,
-    Fishbowl.Host.Configuration.ConfigurationCache cache) =>
+    Fishbowl.Host.Configuration.ConfigurationCache cache,
+    IOptionsMonitorCache<GoogleOptions> googleOptionsCache) =>
 {
     // Lockout: if already configured, 404 (not 302 — harder to bypass)
     var existingId = cache.Get("Google:ClientId");
@@ -294,6 +295,12 @@ app.MapPost("/api/setup", async (
     await repo.SetConfigAsync("Google:ClientSecret", request.ClientSecret);
     cache.Set("Google:ClientId", request.ClientId);
     cache.Set("Google:ClientSecret", request.ClientSecret);
+
+    // Invalidate AspNetCore's GoogleOptions cache. If the options were built
+    // earlier (e.g. via a pre-setup probe) they'd contain "placeholder" values,
+    // and the next challenge would send those to Google — producing
+    // "invalid_client". Clearing forces a rebuild from the fresh cache values.
+    googleOptionsCache.Clear();
 
     return Results.Ok();
 });
