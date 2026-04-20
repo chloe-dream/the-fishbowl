@@ -3,114 +3,57 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>The Fishbowl | Login</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        :root {
-            --bg: #0f172a;
-            --card: #1e293b;
-            --text: #f8fafc;
-            --muted: #94a3b8;
-            --accent: #38bdf8;
-            --accent-hover: #0ea5e9;
-        }
-        body {
-            font-family: 'Outfit', sans-serif;
-            background-color: var(--bg);
-            color: var(--text);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-        }
-        .login-card {
-            background: var(--card);
-            padding: 3rem;
-            border-radius: 1.5rem;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-            width: 100%;
-            max-width: 400px;
-            text-align: center;
-        }
-        h1 { font-weight: 800; margin-bottom: 0.5rem; color: var(--accent); }
-        p { color: var(--muted); margin-bottom: 2.5rem; line-height: 1.5; }
-        
-        .provider-btn {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 12px;
-            width: 100%;
-            padding: 1rem;
-            background: rgba(15, 23, 42, 0.5);
-            border: 1px solid #334155;
-            border-radius: 0.75rem;
-            color: white;
-            font-weight: 600;
-            text-decoration: none;
-            cursor: pointer;
-            transition: all 0.2s;
-            margin-bottom: 1rem;
-        }
-        .provider-btn:hover {
-            border-color: var(--accent);
-            background: rgba(56, 189, 248, 0.1);
-            transform: translateY(-2px);
-        }
-        .provider-btn i { font-size: 1.2rem; }
-
-        .loading-spinner {
-            display: inline-block;
-            width: 2rem;
-            height: 2rem;
-            border: 3px solid rgba(255,255,255,.3);
-            border-radius: 50%;
-            border-top-color: var(--accent);
-            animation: spin 1s ease-in-out infinite;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-    </style>
+    <title>Login · The Fishbowl</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
-    <div class="login-card">
-        <i class="fa-solid fa-fish fa-3x" style="color: var(--accent); margin-bottom: 1.5rem;"></i>
-        <h1>The Fishbowl</h1>
-        <p>Sign in to access your memory</p>
-        
-        <div id="provider-list">
-            <div class="loading-spinner"></div>
-        </div>
-        
-        <div style="margin-top: 2rem; font-size: 0.8rem; color: var(--muted);">
-            "Your memory lives here. You don't."
+    <div class="orb"></div>
+
+    <div class="auth-shell">
+        <div class="auth-card">
+            <div class="fb-logo-mark">
+                <div class="top"></div>
+                <div class="bottom"></div>
+            </div>
+            <h1>THE FISHBOWL</h1>
+            <p class="tagline">Your memory lives here. You don't.</p>
+
+            <div class="providers" id="providers">
+                <!-- Populated by JS -->
+            </div>
+            <p id="error" class="error" style="display:none;"></p>
         </div>
     </div>
 
     <script>
-        const urlParams = new URLSearchParams(window.location.search);
-        const returnUrl = urlParams.get('ReturnUrl') || '/';
+    (async function () {
+        const providersEl = document.getElementById("providers");
+        const errorEl = document.getElementById("error");
 
-        async function loadProviders() {
-            const res = await fetch('/api/auth/providers');
+        try {
+            const res = await fetch("/api/auth/providers");
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const providers = await res.json();
-            const list = document.getElementById('provider-list');
-            
-            if (providers.length === 0) {
-                list.innerHTML = '<p style="color: #ef4444;">No login methods configured.</p>';
+
+            if (!providers || providers.length === 0) {
+                // Unconfigured — go to setup
+                window.location.href = "/setup";
                 return;
             }
 
-            list.innerHTML = providers.map(p => `
-                <a href="/login/challenge/${p.id}?returnUrl=${encodeURIComponent(returnUrl)}" class="provider-btn">
-                    <i class="${p.icon}"></i>
-                    <span>Login with ${p.name}</span>
+            providersEl.innerHTML = providers.map(p => `
+                <a class="provider-btn" href="/login/challenge/${p.id}">
+                    <span>Continue with ${p.name}</span>
                 </a>
-            `).join('');
+            `).join("");
+        } catch (err) {
+            errorEl.textContent = "Unable to load providers: " + err.message;
+            errorEl.style.display = "block";
         }
-
-        loadProviders();
+    })();
     </script>
 </body>
 </html>
