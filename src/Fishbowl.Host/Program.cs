@@ -11,6 +11,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using Fishbowl.Host;
+using Fishbowl.Host.Auth;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -55,6 +56,25 @@ var authBuilder = builder.Services.AddAuthentication(options =>
 .AddCookie(options =>
 {
     options.LoginPath = "/login";
+
+    // Route Bearer requests straight to the ApiKey scheme. The cookie scheme
+    // is the DefaultScheme, so ASP.NET asks it first; when the Authorization
+    // header carries our token format we forward the whole authentication to
+    // ApiKeyAuthenticationHandler. This keeps `.RequireAuthorization()` on
+    // endpoints scheme-agnostic and preserves every existing cookie-based
+    // test — TestAuthHandler-overriding fixtures bypass this selector entirely
+    // because they install their own DefaultScheme.
+    options.ForwardDefaultSelector = ctx =>
+    {
+        var auth = ctx.Request.Headers.Authorization.FirstOrDefault();
+        if (auth is not null &&
+            auth.StartsWith("Bearer fb_", StringComparison.Ordinal))
+        {
+            return ApiKeyAuthenticationOptions.DefaultScheme;
+        }
+        return null;
+    };
+
     options.Events.OnRedirectToLogin = context =>
     {
         if (context.Request.Path.StartsWithSegments("/api"))
@@ -126,6 +146,11 @@ authBuilder.AddGoogle(options =>
         return Task.CompletedTask;
     };
 });
+
+// Bearer auth for programmatic clients (MCP, curl). Coexists with cookie —
+// the default authorization policy (below) tries both schemes per request.
+authBuilder.AddScheme<ApiKeyAuthenticationOptions, ApiKeyAuthenticationHandler>(
+    ApiKeyAuthenticationOptions.DefaultScheme, _ => { });
 
 // Configuration snapshot populated before the server starts listening.
 builder.Services.AddSingleton<Fishbowl.Host.Configuration.ConfigurationCache>();

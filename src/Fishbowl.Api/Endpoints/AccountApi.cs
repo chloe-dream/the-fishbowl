@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using System.Security.Claims;
+using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 
@@ -30,6 +31,31 @@ public static class AccountApi
         .Produces<User>()
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status404NotFound)
+        .RequireAuthorization();
+
+        // Diagnostic: what does the server think about this request's auth?
+        // Used by MCP clients to confirm a Bearer token is valid and to
+        // discover the context + scopes it's bound to. Cookie users see
+        // their personal context and no scopes (cookies have full access).
+        group.MapGet("/auth/whoami", (ClaimsPrincipal user) =>
+        {
+            var userId = user.FindFirst(McpContextClaims.UserId)?.Value;
+            if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+
+            var ctxType = user.FindFirst(McpContextClaims.ContextType)?.Value ?? "user";
+            var ctxId = user.FindFirst(McpContextClaims.ContextId)?.Value ?? userId;
+            var scopes = user.FindAll(McpContextClaims.Scope).Select(c => c.Value).ToList();
+
+            return Results.Ok(new
+            {
+                userId,
+                context = new { type = ctxType, id = ctxId },
+                scopes,
+                authType = user.Identity?.AuthenticationType,
+            });
+        })
+        .WithName("WhoAmI")
+        .WithSummary("Returns the resolved context and scopes for the current request.")
         .RequireAuthorization();
 
         // POST is correct for a state-changing operation (sign-out clears the
