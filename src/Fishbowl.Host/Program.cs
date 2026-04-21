@@ -52,6 +52,12 @@ builder.Services.AddSingleton(sp => new ModelDownloader(
     logger: sp.GetRequiredService<ILogger<ModelDownloader>>()));
 builder.Services.AddSingleton<IEmbeddingService, EmbeddingService>();
 
+// Hybrid search blends sqlite-vec cosine distance with FTS5 bm25. Scoped
+// because it takes DatabaseFactory (singleton) and opens a per-query
+// connection — no state to share across requests, but keeping it scoped
+// matches the surrounding repository registrations.
+builder.Services.AddScoped<ISearchService, Fishbowl.Data.Search.HybridSearchService>();
+
 // Background download on first start. Detached so a 90MB pull over slow
 // bandwidth doesn't block app startup — callers degrade gracefully via
 // EmbeddingUnavailableException until the model lands.

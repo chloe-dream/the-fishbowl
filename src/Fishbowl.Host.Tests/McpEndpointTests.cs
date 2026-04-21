@@ -238,7 +238,10 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
         var text = search.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString();
         using var doc = JsonDocument.Parse(text!);
         var notes = doc.RootElement.GetProperty("notes");
-        Assert.Equal(1, notes.GetArrayLength());
+        // Hybrid search can surface additional low-signal hits from the
+        // vector side, so we no longer require exclusivity — the lexical
+        // winner must still rank first though.
+        Assert.True(notes.GetArrayLength() >= 1);
         Assert.Equal("distinctive-search-target",
             notes[0].GetProperty("title").GetString());
     }

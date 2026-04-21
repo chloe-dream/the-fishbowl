@@ -2,24 +2,24 @@ using System.Security.Claims;
 using System.Text.Json;
 using Fishbowl.Core;
 using Fishbowl.Core.Mcp;
-using Fishbowl.Core.Repositories;
-using Fishbowl.Core.Util;
+using Fishbowl.Core.Search;
 
 namespace Fishbowl.Mcp.Tools;
 
-// Keyword search over notes in the resolved context. FTS-only for v1 —
-// Phase 5's HybridSearchService replaces this with a 70/30 semantic+FTS
-// merge. Until then the implementation does a client-side substring
-// filter, which is fine for personal-scale data volume.
+// Hybrid (semantic + FTS) search over notes in the resolved context.
+// HybridSearchService handles the blending; this tool is a thin adapter
+// that parses MCP args, invokes the search, and shapes the response.
+// Secrets are already stripped by the service.
 public class SearchMemoryTool : IMcpTool
 {
-    private readonly INoteRepository _notes;
+    private readonly ISearchService _search;
 
-    public SearchMemoryTool(INoteRepository notes) { _notes = notes; }
+    public SearchMemoryTool(ISearchService search) { _search = search; }
 
     public string Name => "search_memory";
     public string Description =>
-        "Full-text search over notes in the current context. Returns matching notes with secrets stripped.";
+        "Hybrid (semantic + keyword) search over notes in the current context. " +
+        "Returns matching notes ranked by relevance with secrets stripped.";
     public string RequiredScope => "read:notes";
     public object InputSchema => new
     {
@@ -43,23 +43,24 @@ public class SearchMemoryTool : IMcpTool
             || p.ValueKind == JsonValueKind.Null
             || p.GetBoolean();
 
-        var q = query.Trim();
-        if (string.IsNullOrEmpty(q)) return new { notes = Array.Empty<object>() };
+        var result = await _search.HybridSearchAsync(ctx, query, limit, includePending, ct);
 
-        var all = await _notes.GetAllAsync(ctx, ct);
-        var ql = q.ToLowerInvariant();
-
-        var hits = all
-            .Where(n => !n.Archived)
-            .Where(n => includePending || !n.Tags.Contains("review:pending"))
-            .Where(n =>
-                (n.Title ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                (n.Content ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                n.Tags.Any(t => t.Contains(ql, StringComparison.OrdinalIgnoreCase)))
-            .Take(limit)
-            .Select(SecretStripper.StripNote)
-            .ToList();
-
-        return new { notes = hits };
+        // Surface the degraded flag so MCP clients can reason about partial
+        // ranking (e.g. when the embedding model is still downloading on
+        // first run). Notes come through already stripped of secret blocks.
+        return new
+        {
+            notes = result.Hits.Select(h => new
+            {
+                id = h.Note.Id,
+                title = h.Note.Title,
+                content = h.Note.Content,
+                tags = h.Note.Tags,
+                created_at = h.Note.CreatedAt,
+                updated_at = h.Note.UpdatedAt,
+                score = h.Score,
+            }).ToList(),
+            degraded = result.Degraded,
+        };
     }
 }
