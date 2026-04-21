@@ -73,6 +73,18 @@
             create: ({ name }) => request("/teams", { method: "POST", body: JSON.stringify({ name }) }),
             delete: (slug)   => request(`/teams/${encodeURIComponent(slug)}`, { method: "DELETE" }),
         },
+        // API keys — the create() response is the ONLY moment the raw token
+        // exists on the client. Store nothing; surface it to the user with a
+        // one-time-view dialog and let them copy it themselves.
+        keys: {
+            list:   ()       => request("/keys"),
+            create: ({ name, contextType, contextId, scopes }) =>
+                request("/keys", {
+                    method: "POST",
+                    body: JSON.stringify({ name, contextType, contextId, scopes }),
+                }),
+            delete: (id)     => request(`/keys/${encodeURIComponent(id)}`, { method: "DELETE" }),
+        },
         version: () => request("/version"),
         providers: () => fetch("/api/auth/providers").then(r => r.json()),
         me: {

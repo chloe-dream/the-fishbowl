@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Dapper;
 using Fishbowl.Core;
+using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 using Fishbowl.Data;
 using Fishbowl.Data.Repositories;
@@ -18,6 +19,7 @@ public class ApiKeyAuthTests : IClassFixture<WebApplicationFactory<Program>>, ID
     private readonly WebApplicationFactory<Program> _factory;
     private readonly DatabaseFactory _dbFactory;
     private readonly ApiKeyRepository _keys;
+    private readonly NoteRepository _notes;
     private readonly string _dataDir;
     private const string AliceId = "apikey_alice";
     private const string BobId = "apikey_bob";
@@ -29,6 +31,7 @@ public class ApiKeyAuthTests : IClassFixture<WebApplicationFactory<Program>>, ID
 
         _dbFactory = new DatabaseFactory(_dataDir);
         _keys = new ApiKeyRepository(_dbFactory);
+        _notes = new NoteRepository(_dbFactory, new TagRepository(_dbFactory));
 
         // FK: api_keys.user_id references users(id). TestAuthHandler isn't in
         // play here — seed the user row directly. Also seed the profile so
@@ -147,6 +150,98 @@ public class ApiKeyAuthTests : IClassFixture<WebApplicationFactory<Program>>, ID
         Assert.Equal("fishbowl-dev", payload.Context.Id);
         Assert.Equal(AliceId, payload.UserId);
         Assert.Single(payload.Scopes, "read:notes");
+    }
+
+    [Fact]
+    public async Task ValidBearer_ReadsOwnNotesThroughRealEndpoint()
+    {
+        // End-to-end proof that a Bearer-authenticated request reaches a
+        // real repository-backed endpoint and sees the caller's data. whoami
+        // only proves the claims are set; this proves the principal actually
+        // flows into the request pipeline the way cookie auth does.
+        await _notes.CreateAsync(AliceId, new Note { Title = "alice-only" },
+            TestContext.Current.CancellationToken);
+
+        var issued = await _keys.IssueAsync(AliceId, ContextRef.User(AliceId), "rw",
+            new[] { "read:notes", "write:notes" }, TestContext.Current.CancellationToken);
+
+        var client = ClientWithToken(issued.RawToken);
+        var resp = await client.GetAsync("/api/v1/notes", TestContext.Current.CancellationToken);
+        resp.EnsureSuccessStatusCode();
+        var list = await resp.Content.ReadFromJsonAsync<List<Note>>(
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(list);
+        Assert.Single(list!);
+        Assert.Equal("alice-only", list![0].Title);
+    }
+
+    [Fact]
+    public async Task BearerBoundToAlice_CannotSeeBobsNotes()
+    {
+        // The hardest isolation property — a token MUST only reach the data
+        // of the user it was issued against. Failure here would be a silent
+        // cross-tenant leak.
+        await _notes.CreateAsync(AliceId, new Note { Title = "alice-secret" },
+            TestContext.Current.CancellationToken);
+        await _notes.CreateAsync(BobId, new Note { Title = "bob-secret" },
+            TestContext.Current.CancellationToken);
+
+        var alicesKey = await _keys.IssueAsync(AliceId, ContextRef.User(AliceId), "rw",
+            new[] { "read:notes" }, TestContext.Current.CancellationToken);
+
+        var client = ClientWithToken(alicesKey.RawToken);
+        var resp = await client.GetAsync("/api/v1/notes", TestContext.Current.CancellationToken);
+        resp.EnsureSuccessStatusCode();
+        var raw = await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains("alice-secret", raw);
+        Assert.DoesNotContain("bob-secret", raw);
+    }
+
+    [Fact]
+    public async Task RevokedBearer_DeniedAtNotesEndpoint()
+    {
+        // Revocation must take effect immediately — no cached-principal
+        // window where a revoked token still reads data.
+        await _notes.CreateAsync(AliceId, new Note { Title = "timestamped" },
+            TestContext.Current.CancellationToken);
+
+        var issued = await _keys.IssueAsync(AliceId, ContextRef.User(AliceId), "short-lived",
+            new[] { "read:notes" }, TestContext.Current.CancellationToken);
+
+        var client = ClientWithToken(issued.RawToken);
+
+        // Works before revocation.
+        var ok = await client.GetAsync("/api/v1/notes", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+
+        await _keys.RevokeAsync(issued.Record.Id, AliceId, TestContext.Current.CancellationToken);
+
+        // Same token, same client — blocked now.
+        var denied = await client.GetAsync("/api/v1/notes", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+    }
+
+    [Fact]
+    public async Task ValidBearer_CanWriteNotes_AndWrittenNoteComesBackInList()
+    {
+        var issued = await _keys.IssueAsync(AliceId, ContextRef.User(AliceId), "writer",
+            new[] { "read:notes", "write:notes" }, TestContext.Current.CancellationToken);
+
+        var client = ClientWithToken(issued.RawToken);
+
+        var post = await client.PostAsJsonAsync("/api/v1/notes",
+            new { title = "written-via-bearer" },
+            TestContext.Current.CancellationToken);
+        post.EnsureSuccessStatusCode();
+
+        var list = await client.GetFromJsonAsync<List<Note>>("/api/v1/notes",
+            TestContext.Current.CancellationToken);
+        Assert.Contains(list!, n => n.Title == "written-via-bearer");
+
+        // Note must land in Alice's user DB, not a team DB.
+        var aliceDbPath = Path.Combine(_dataDir, "users", $"{AliceId}.db");
+        Assert.True(File.Exists(aliceDbPath), $"expected {aliceDbPath} to exist");
     }
 
     [Fact]

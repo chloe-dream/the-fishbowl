@@ -351,6 +351,7 @@ app.MapNotesApi();
 app.MapTagsApi();
 app.MapTodoApi();
 app.MapTeamsApi();
+app.MapApiKeysApi();
 app.MapAccountApi();
 
 // Root route — gate the hub behind setup + authentication so the first click
