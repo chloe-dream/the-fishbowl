@@ -53,8 +53,10 @@ public class DatabaseFactoryTests : IDisposable
         Assert.Contains("teams", tables);
         Assert.Contains("team_members", tables);
 
+        Assert.Contains("api_keys", tables);
+
         var version = connection.ExecuteScalar<long>("PRAGMA user_version");
-        Assert.Equal(2, version);
+        Assert.Equal(3, version);
     }
 
     [Fact]

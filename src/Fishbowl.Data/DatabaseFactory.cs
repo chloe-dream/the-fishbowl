@@ -180,6 +180,14 @@ public class DatabaseFactory
             ApplySystemV2(connection);
             connection.Execute("PRAGMA user_version = 2");
             _logger.LogInformation("Applied system schema v2");
+            version = 2;
+        }
+
+        if (version < 3)
+        {
+            ApplySystemV3(connection);
+            connection.Execute("PRAGMA user_version = 3");
+            _logger.LogInformation("Applied system schema v3");
         }
     }
 
@@ -451,6 +459,48 @@ public class DatabaseFactory
             // index covers user-side lookups.
             connection.Execute(
                 "CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id)",
+                transaction: transaction);
+
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    private void ApplySystemV3(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            // Bearer tokens minted by users to authenticate programmatic
+            // clients (Claude Code, curl, etc). `key_hash` stores SHA-256 of
+            // the raw token; `key_prefix` is the first 12 chars of the raw
+            // token (covers "fb_live_" + 4 random chars) and backs the index
+            // that narrows candidates before the constant-time compare.
+            // `scopes` is a JSON array — handler in Fishbowl.Data.Dapper
+            // keeps List<string> ↔ JSON round-tripping transparent.
+            connection.Execute(@"
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id            TEXT PRIMARY KEY,
+                    user_id       TEXT NOT NULL REFERENCES users(id),
+                    context_type  TEXT NOT NULL CHECK(context_type IN ('user','team')),
+                    context_id    TEXT NOT NULL,
+                    name          TEXT NOT NULL,
+                    key_hash      TEXT NOT NULL,
+                    key_prefix    TEXT NOT NULL,
+                    scopes        TEXT NOT NULL,
+                    created_at    TEXT NOT NULL,
+                    last_used_at  TEXT,
+                    revoked_at    TEXT
+                );", transaction: transaction);
+
+            // Partial index — only live keys. Revoked keys stay in the table
+            // for audit but don't pollute the lookup hot path.
+            connection.Execute(
+                "CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(key_prefix) WHERE revoked_at IS NULL",
                 transaction: transaction);
 
             transaction.Commit();

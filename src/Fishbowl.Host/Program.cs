@@ -34,6 +34,7 @@ builder.Services.AddScoped<ITagRepository, TagRepository>();
 builder.Services.AddScoped<INoteRepository, NoteRepository>();
 builder.Services.AddScoped<ITodoRepository, TodoRepository>();
 builder.Services.AddScoped<ITeamRepository, TeamRepository>();
+builder.Services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
 
 // Load plugins from configured path (defaults to fishbowl-mods/plugins)
 var pluginsPath = builder.Configuration["Plugins:Path"] ?? "fishbowl-mods/plugins";

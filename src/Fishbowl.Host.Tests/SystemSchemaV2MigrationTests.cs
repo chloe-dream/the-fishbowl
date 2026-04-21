@@ -21,8 +21,9 @@ public class SystemSchemaV2MigrationTests : IDisposable
         var factory = new DatabaseFactory(_dataDir);
         using var db = factory.CreateSystemConnection();
 
+        // Migrations chain: fresh DB rolls all the way up to the current head.
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(2, version);
+        Assert.True(version >= 2, $"expected version >= 2, got {version}");
 
         var tables = (await db.QueryAsync<string>(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")).ToList();
@@ -62,7 +63,7 @@ public class SystemSchemaV2MigrationTests : IDisposable
         using var db = factory.CreateSystemConnection();
 
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(2, version);
+        Assert.True(version >= 2, $"expected version >= 2, got {version}");
 
         var userExists = await db.ExecuteScalarAsync<long>(
             "SELECT COUNT(*) FROM users WHERE id = 'u1'");
