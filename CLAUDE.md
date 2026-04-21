@@ -10,9 +10,9 @@ Self-hosted personal memory + assistant. **`CONCEPT.md` is the target spec** —
 
 Find the closest existing solution and **extend it**, don't parallel it. Almost-fits → add overload/option/partial. Genuinely wrong → say so and migrate callers. **Never silently diverge.**
 
-- **HTTP endpoints**: `MapXxxApi()` extensions on `IEndpointRouteBuilder` (see `NotesApi.cs`); read user via `fishbowl_user_id` claim, call a repository. Routes under `/api/v1/`.
-- **Repositories**: interface in `Fishbowl.Core.Repositories`, impl in `Fishbowl.Data.Repositories`, `AddScoped`. Access via `DatabaseFactory.CreateConnection(userId)` or `CreateSystemConnection()`.
-- **Multi-step writes**: `_dbFactory.WithUserTransactionAsync(userId, async (db, tx, ct) => …)` — see `NoteRepository` for `notes` + `notes_fts` syncing.
+- **HTTP endpoints**: `MapXxxApi()` extensions on `IEndpointRouteBuilder`; resolve the request's scope via `McpContextClaims.Resolve(user)` → `ContextRef` (User or Team), call a repository. Gate with `.RequireScope("read:notes")` etc. — cookie principals bypass scope; Bearer principals must match. Routes under `/api/v1/`.
+- **Repositories**: interface in `Fishbowl.Core.Repositories`, impl in `Fishbowl.Data.Repositories`, `AddScoped`. Access via `DatabaseFactory.CreateContextConnection(ctx)` or `CreateSystemConnection()`. The legacy `CreateConnection(userId)` is a `ContextRef.User`-alias kept for cookie callers.
+- **Multi-step writes**: `_dbFactory.WithContextTransactionAsync(ctx, async (db, tx, ct) => …)` — see `NoteRepository` for `notes` + `notes_fts` syncing.
 - **Schema changes**: add `ApplyVN` in `DatabaseFactory`, bump `PRAGMA user_version`. No EF Core, no migration runner.
 - **UI resources/scripts/templates**: `IResourceProvider.GetAsync(path)` only (disk → DB → embedded). Never direct file I/O.
 - **Plugins**: implement `IFishbowlPlugin`, register via `IFishbowlApi.AddBotClient/AddSyncProvider/AddScheduledJob` (`Fishbowl.Core.Plugins`).
@@ -37,17 +37,18 @@ dotnet test --filter "FullyQualifiedName~TestName"
 
 **Dependency direction:** `Host → Api/Bot.Discord/Sync/Scheduler/Scripting → Data/Search → Core`. `Fishbowl.Host` is the **only publish target**; everything else is a library. No cycles, no upward refs.
 
-**Two SQLite DBs, one `DatabaseFactory` (singleton):**
-- `CreateSystemConnection()` → `fishbowl-data/system.db` — `users`, `user_mappings` (OAuth provider → internal id), `system_config`.
-- `CreateConnection(userId)` → `fishbowl-data/users/{userId}.db` — `notes`, `events`, `todos`, `sync_sources`, `reminders`, `notes_fts`.
+**One `DatabaseFactory` (singleton), three DB locations:**
+- `CreateSystemConnection()` → `fishbowl-data/system.db` — `users`, `user_mappings`, `teams`, `team_members`, `api_keys`, `system_config`.
+- `CreateContextConnection(ContextRef.User(userId))` → `fishbowl-data/users/{userId}.db` — notes, events, todos, tags, notes_fts.
+- `CreateContextConnection(ContextRef.Team(slug))` → `fishbowl-data/teams/{slug}.db` — identical schema to user DBs.
 
 Lazy migrations keyed on `PRAGMA user_version`. Dapper raw SQL; IDs are ULIDs (`Ulid.NewUlid().ToString()`).
 
-**User identity via custom claim.** Google OAuth + cookies. On first login, `Program.cs` (`OnTicketReceived`) creates a Fishbowl user (GUID), maps `(provider, providerId) → internalUserId` in `user_mappings`, adds a **`fishbowl_user_id`** claim. **Every API endpoint reads `user.FindFirst("fishbowl_user_id")?.Value`** — never `NameIdentifier`. Data isolation is by file boundary, not row filtering.
+**Two auth schemes, one principal shape.** Cookie (Google OAuth; default) and ApiKey (Bearer `fb_live_…`). On first login, `Program.cs` creates a Fishbowl user, maps `(provider, providerId) → internalUserId`, adds a `fishbowl_user_id` claim. Bearer keys additionally carry `fishbowl_context_type` + `fishbowl_context_id` + one `scope` claim each — `McpContextClaims.Resolve(user)` collapses all of that to a single `ContextRef`. The cookie scheme forwards Bearer requests to ApiKey via `ForwardDefaultSelector`, so `.RequireAuthorization()` is scheme-agnostic. Data isolation is by file boundary, not row filtering.
 
 **OAuth creds in `system.db`, not `appsettings.json`.** `GoogleOptions` binds against `ConfigurationCache` populated at startup by `ConfigurationInitializer : IHostedService`. `POST /api/setup` writes both DB and cache so changes propagate without a restart. Unconfigured options use sentinel `"placeholder"`.
 
-**API paths return 401, not 302.** `OnRedirectToLogin` is overridden so `/api` requests get `401` instead of redirect to Google — covered by `AuthBehaviorTests.GetApiNotes_Returns401_NotRedirect_Test`. OpenAPI doc at `/api/openapi.json`.
+**API/MCP paths return 401, not 302.** `OnRedirectToLogin` is overridden so `/api` and `/mcp` requests get `401` instead of redirect to Google — browsers following the redirect would ruin Bearer/MCP flows. OpenAPI doc at `/api/openapi.json`.
 
 **`/setup` locked after config.** Once `Google:ClientId` is set, `GET /setup` and `POST /api/setup` return `404` (not 302 — harder to bypass). Validates: ClientId ends `.apps.googleusercontent.com`, ClientSecret ≥ 20 chars. No antiforgery (only responds when unconfigured).
 
@@ -58,6 +59,8 @@ Lazy migrations keyed on `PRAGMA user_version`. Dapper raw SQL; IDs are ULIDs (`
 **UI is vanilla JS SPA — no framework, no build step.** `index.html` is the shell; views mount in `#app-root` via `fb.router.register("#/path", "tag-name", { label, icon })`. **Views use light DOM** (so `app.css` applies); **components use Shadow DOM** (style isolation). Theme via CSS custom props on `:root` (`--accent`, `--accent-warm`, `--danger`, `--glass`, `--border`, `--text-muted`). System components prefixed `fb-`; mods use `usr_` in `fishbowl-mods/components/`. `fb.icons.register(name, path)` extends icons. `/login` and `/setup` stay server-rendered. Component spec: `docs/superpowers/specs/2026-04-19-ui-foundation-design.md`.
 
 **UI smoke test (`Fishbowl.Ui.Tests`)** launches `Fishbowl.Host` as a real subprocess on a free port for Playwright (not `TestServer`). A gated bypass (`FISHBOWL_PLAYWRIGHT_TEST` env + `Testing` environment) injects a test user. **Never set `FISHBOWL_PLAYWRIGHT_TEST` outside that fixture.**
+
+**MCP surface** at `POST /mcp` — JSON-RPC 2.0 over Streamable HTTP, Bearer-auth only. Five tools in `Fishbowl.Mcp.Tools/*`: `search_memory`, `remember`, `get_memory`, `update_memory`, `list_pending`. Each implements `IMcpTool` with a `RequiredScope`; `ToolRegistry` lists them for `tools/list`. MCP writes pass `NoteSource.Mcp` → `NoteRepository.ApplySourceTags` auto-adds `source:mcp` + `review:pending`. Human edits (cookie path) strip `review:pending` (approval by editing). **Secret-strip invariant:** every note response runs through `SecretStripper.StripNote` — `::secret`…`::end` blocks and `content_secret` blobs must never cross the MCP wire. Enforced by `SecretStripInvariantTests`.
 
 ## Testing
 
@@ -72,7 +75,8 @@ Lazy migrations keyed on `PRAGMA user_version`. Dapper raw SQL; IDs are ULIDs (`
 - **FTS5 must stay synced.** `notes_fts.rowid` maps to `notes.rowid` via `(SELECT rowid FROM notes WHERE id = @Id)`. On delete, remove from `notes_fts` BEFORE `notes`. Tags are space-joined string (not JSON).
 - **Logging via `ILogger<T>?` defaulting to `NullLogger<T>.Instance`** so tests can construct objects directly. **Never log PII** (email, name, content, secrets, tokens).
 - SQLite `DateTime` stored ISO-8601 (`.ToString("o")`); booleans as `INTEGER 0/1`; IDs are ULIDs.
-- Secrets use `::secret` markdown block + separate `content_secret BLOB` (client-encrypted). **Never include secret content in FTS, embeddings, or chat responses** — non-negotiable.
+- Secrets use `::secret` markdown block + separate `content_secret BLOB` (client-encrypted). **Never include secret content in FTS, embeddings, or chat responses** — non-negotiable; enforced by `SecretStripper` on every MCP return path.
+- **System tags** carry three flags (`is_system`, `user_assignable`, `user_removable`) — set in `Fishbowl.Core.Util.SystemTags.Seeds`. Current seeds: `review:pending` (removable by user), `source:mcp` (locked). Rename/delete of `is_system=1` rows rejected in `TagRepository`.
 - Modding rule: "disk file wins, else default" — uniform across components/styles/scripts/templates/plugins. No registration manifests or whitelists.
 
 ## CI
