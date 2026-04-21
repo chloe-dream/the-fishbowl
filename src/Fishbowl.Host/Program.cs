@@ -78,7 +78,10 @@ var authBuilder = builder.Services.AddAuthentication(options =>
 
     options.Events.OnRedirectToLogin = context =>
     {
-        if (context.Request.Path.StartsWithSegments("/api"))
+        // Programmatic endpoints get 401 instead of an HTML redirect —
+        // browsers following the redirect would ruin Bearer/MCP flows.
+        var path = context.Request.Path;
+        if (path.StartsWithSegments("/api") || path.StartsWithSegments("/mcp"))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
         }
