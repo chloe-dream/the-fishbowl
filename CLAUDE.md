@@ -39,10 +39,12 @@ dotnet test --filter "FullyQualifiedName~TestName"
 
 **One `DatabaseFactory` (singleton), three DB locations:**
 - `CreateSystemConnection()` → `fishbowl-data/system.db` — `users`, `user_mappings`, `teams`, `team_members`, `api_keys`, `system_config`.
-- `CreateContextConnection(ContextRef.User(userId))` → `fishbowl-data/users/{userId}.db` — notes, events, todos, tags, notes_fts.
+- `CreateContextConnection(ContextRef.User(userId))` → `fishbowl-data/users/{userId}.db` — notes, events, todos, tags, notes_fts, vec_notes.
 - `CreateContextConnection(ContextRef.Team(slug))` → `fishbowl-data/teams/{slug}.db` — identical schema to user DBs.
 
 Lazy migrations keyed on `PRAGMA user_version`. Dapper raw SQL; IDs are ULIDs (`Ulid.NewUlid().ToString()`).
+
+**sqlite-vec loaded on every context open.** `SqliteVecLoader.LoadInto(conn)` enables extension loading, calls `LoadExtension("vec0")`, then flips extensions back off. Binaries ship via the `sqlite-vec` NuGet package (v0.1.7-alpha.2 by roji + jeffhandley) — MSBuild drops them under `runtimes/{rid}/native/` automatically. System DB skips this (no vec tables there).
 
 **Two auth schemes, one principal shape.** Cookie (Google OAuth; default) and ApiKey (Bearer `fb_live_…`). On first login, `Program.cs` creates a Fishbowl user, maps `(provider, providerId) → internalUserId`, adds a `fishbowl_user_id` claim. Bearer keys additionally carry `fishbowl_context_type` + `fishbowl_context_id` + one `scope` claim each — `McpContextClaims.Resolve(user)` collapses all of that to a single `ContextRef`. The cookie scheme forwards Bearer requests to ApiKey via `ForwardDefaultSelector`, so `.RequireAuthorization()` is scheme-agnostic. Data isolation is by file boundary, not row filtering.
 
@@ -62,6 +64,14 @@ Lazy migrations keyed on `PRAGMA user_version`. Dapper raw SQL; IDs are ULIDs (`
 
 **MCP surface** at `POST /mcp` — JSON-RPC 2.0 over Streamable HTTP, Bearer-auth only. Five tools in `Fishbowl.Mcp.Tools/*`: `search_memory`, `remember`, `get_memory`, `update_memory`, `list_pending`. Each implements `IMcpTool` with a `RequiredScope`; `ToolRegistry` lists them for `tools/list`. MCP writes pass `NoteSource.Mcp` → `NoteRepository.ApplySourceTags` auto-adds `source:mcp` + `review:pending`. Human edits (cookie path) strip `review:pending` (approval by editing). **Secret-strip invariant:** every note response runs through `SecretStripper.StripNote` — `::secret`…`::end` blocks and `content_secret` blobs must never cross the MCP wire. Enforced by `SecretStripInvariantTests`.
 
+**Hybrid search** (`HybridSearchService` in `Fishbowl.Data.Search`) blends sqlite-vec cosine distance (70%) with FTS5 bm25 (30%), each min-max normalised over a 50-candidate pool. `search_memory` tool always calls it; a `degraded: true` flag surfaces on the response when the embedding model isn't ready yet and ranking falls back to FTS-only. FTS query tokens are split on non-alphanumeric then prefix-matched with `AND` — matches how FTS5's default tokenizer indexes hyphenated identifiers. Lives in `Fishbowl.Data.Search` (not `Fishbowl.Search`) because it needs `DatabaseFactory`, and the dep direction forbids `Fishbowl.Search → Fishbowl.Data`; same reason `SqliteVecLoader` is in `Fishbowl.Data`.
+
+**Embeddings:** `MiniLmPipeline` (ONNX Runtime + `Microsoft.ML.Tokenizers.BertTokenizer`) produces 384-dim L2-normalised float vectors for `sentence-transformers/all-MiniLM-L6-v2`. `ModelDownloader` pulls `model.onnx` + `vocab.txt` from HuggingFace on first start, SHA-256-pinned for the LFS-stored model. `EmbeddingInitializer` (`IHostedService`) runs the download detached. Callers on the hot path catch `EmbeddingUnavailableException` and degrade — `NoteRepository.UpsertEmbeddingAsync` logs and continues, `HybridSearchService` flips to FTS-only. `IEmbeddingService` lives in `Fishbowl.Core.Search` so `NoteRepository` can depend on it without a reverse-dep into `Fishbowl.Search`.
+
+**vec_notes sync.** User DB v4 adds `vec_notes` (sqlite-vec virtual table, `FLOAT[384]`). Every `NoteRepository` write embeds `title + stripped content + tags` and writes the blob in the same transaction as `notes` + `notes_fts`. sqlite-vec's vec0 doesn't honour `INSERT OR REPLACE` as a true replace — use **DELETE then INSERT** explicitly. On delete, remove from `vec_notes` BEFORE `notes` (same pattern as `notes_fts`). Text fed to the model is always secret-stripped — a vector built from secret content would let semantic search surface notes on hidden text, violating the same invariant as the MCP wire.
+
+**`POST /api/v1/search/reindex`** (cookie-only) triggers `NoteRepository.ReEmbedAllAsync` — iterates every note in the resolved context, re-runs the embed+DELETE+INSERT in one transaction, returns `{ processed, failed }`. Bearer requests get 403. Used on model upgrade or the first time embeddings become available for a pre-existing personal DB.
+
 ## Testing
 
 - `WebApplicationFactory<Program>` requires `public partial class Program { }` at end of `Program.cs` — leave it.
@@ -72,7 +82,7 @@ Lazy migrations keyed on `PRAGMA user_version`. Dapper raw SQL; IDs are ULIDs (`
 ## Conventions
 
 - **Dapper snake_case via `DapperConventions.Install()`** in `DatabaseFactory` static ctor — `created_at` → `CreatedAt` works automatically. `JsonTagsHandler` handles `List<string>` ↔ JSON for `notes.tags`. Use `QueryAsync<T>`, never `QueryAsync<dynamic>` with manual mappers.
-- **FTS5 must stay synced.** `notes_fts.rowid` maps to `notes.rowid` via `(SELECT rowid FROM notes WHERE id = @Id)`. On delete, remove from `notes_fts` BEFORE `notes`. Tags are space-joined string (not JSON).
+- **FTS5 + vec_notes must stay synced.** `notes_fts.rowid` maps to `notes.rowid` via `(SELECT rowid FROM notes WHERE id = @Id)`. On delete, remove from `vec_notes` AND `notes_fts` BEFORE `notes`. Tags are space-joined string (not JSON).
 - **Logging via `ILogger<T>?` defaulting to `NullLogger<T>.Instance`** so tests can construct objects directly. **Never log PII** (email, name, content, secrets, tokens).
 - SQLite `DateTime` stored ISO-8601 (`.ToString("o")`); booleans as `INTEGER 0/1`; IDs are ULIDs.
 - Secrets use `::secret` markdown block + separate `content_secret BLOB` (client-encrypted). **Never include secret content in FTS, embeddings, or chat responses** — non-negotiable; enforced by `SecretStripper` on every MCP return path.

@@ -1,0 +1,143 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using Dapper;
+using Fishbowl.Core;
+using Fishbowl.Core.Models;
+using Fishbowl.Core.Repositories;
+using Fishbowl.Data;
+using Fishbowl.Data.Repositories;
+using Fishbowl.Host.Auth;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+namespace Fishbowl.Host.Tests;
+
+// Covers POST /api/v1/search/reindex. Bearer rejection is the most
+// load-bearing assertion — we do not want API keys to trigger maintenance
+// jobs on a user's DB.
+public class SearchApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+{
+    private readonly WebApplicationFactory<Program> _factory;
+    private readonly DatabaseFactory _dbFactory;
+    private readonly ApiKeyRepository _keys;
+    private readonly string _dataDir;
+    private const string UserId = "search_api_user";
+
+    public SearchApiTests(WebApplicationFactory<Program> factory)
+    {
+        _dataDir = Path.Combine(Path.GetTempPath(), "fishbowl_search_api_" + Path.GetRandomFileName());
+        Directory.CreateDirectory(_dataDir);
+
+        _dbFactory = new DatabaseFactory(_dataDir);
+        _keys = new ApiKeyRepository(_dbFactory);
+
+        using (var db = _dbFactory.CreateSystemConnection())
+        {
+            db.Execute(
+                "INSERT OR IGNORE INTO users(id, name, email, created_at) VALUES (@id, 'U', 'u@u', @now)",
+                new { id = UserId, now = DateTime.UtcNow.ToString("o") });
+        }
+
+        _factory = factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Testing");
+            builder.ConfigureServices(services =>
+            {
+                var existing = services.SingleOrDefault(d => d.ServiceType == typeof(DatabaseFactory));
+                if (existing != null) services.Remove(existing);
+                services.AddSingleton<DatabaseFactory>(_dbFactory);
+
+                services.AddAuthentication(options =>
+                {
+                    options.DefaultAuthenticateScheme = TestAuthHandler.AuthenticationScheme;
+                    options.DefaultChallengeScheme = TestAuthHandler.AuthenticationScheme;
+                    options.DefaultScheme = TestAuthHandler.AuthenticationScheme;
+                })
+                .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(
+                    TestAuthHandler.AuthenticationScheme, options =>
+                    {
+                        options.ForwardDefaultSelector = ctx =>
+                        {
+                            var auth = ctx.Request.Headers.Authorization.FirstOrDefault();
+                            if (auth is not null &&
+                                auth.StartsWith("Bearer fb_", StringComparison.Ordinal))
+                            {
+                                return ApiKeyAuthenticationOptions.DefaultScheme;
+                            }
+                            return null;
+                        };
+                    });
+            });
+        });
+    }
+
+    [Fact]
+    public async Task Reindex_CookieAuth_ReturnsProcessedCount()
+    {
+        // Seed a note so there's something to (re-)embed. No assertion on
+        // count beyond "response shape is correct" — the embedding service
+        // in tests may not have the model downloaded, in which case each
+        // note is skipped without failing.
+        var notes = new NoteRepository(_dbFactory, new TagRepository(_dbFactory));
+        await notes.CreateAsync(UserId,
+            new Note { Title = "reindexable", Content = "body" },
+            TestContext.Current.CancellationToken);
+
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Id", UserId);
+
+        var resp = await client.PostAsync("/api/v1/search/reindex", content: null,
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        var body = await resp.Content.ReadFromJsonAsync<ReindexResponse>(
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(body);
+        Assert.True(body!.Processed >= 0);
+        Assert.True(body.Failed >= 0);
+    }
+
+    [Fact]
+    public async Task Reindex_BearerAuth_Returns403()
+    {
+        // Maintenance endpoints are cookie-only — an API key should never
+        // be able to trigger re-embedding.
+        var issued = await _keys.IssueAsync(UserId, ContextRef.User(UserId), "search-probe",
+            new[] { "read:notes", "write:notes" }, TestContext.Current.CancellationToken);
+
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", issued.RawToken);
+
+        var resp = await client.PostAsync("/api/v1/search/reindex", content: null,
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Reindex_NoAuth_Returns401()
+    {
+        var client = _factory.CreateClient();
+        var resp = await client.PostAsync("/api/v1/search/reindex", content: null,
+            TestContext.Current.CancellationToken);
+        Assert.True(
+            resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden,
+            $"Expected 401 or 403 for unauthenticated call, got {(int)resp.StatusCode}");
+    }
+
+    public void Dispose()
+    {
+        _factory.Dispose();
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        if (Directory.Exists(_dataDir))
+        {
+            try { Directory.Delete(_dataDir, true); } catch { }
+        }
+    }
+
+    private record ReindexResponse(int Processed, int Failed);
+}

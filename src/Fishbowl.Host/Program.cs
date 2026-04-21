@@ -392,6 +392,7 @@ app.MapTodoApi();
 app.MapTeamsApi();
 app.MapApiKeysApi();
 app.MapAccountApi();
+app.MapSearchApi();
 app.MapMcpEndpoint();
 
 // Root route — gate the hub behind setup + authentication so the first click

@@ -206,6 +206,68 @@ public class NoteRepository : INoteRepository
         }, ct);
     }
 
+    // ────────── Bulk re-embed ──────────
+    //
+    // Runs each note's embedding sequentially in a single transaction. On
+    // SQLite this is fine at personal-memory scale; for very large vaults
+    // we'd want chunked commits to keep the WAL bounded. Keep an eye on
+    // durations in logs.
+    public async Task<ReEmbedResult> ReEmbedAllAsync(ContextRef ctx, CancellationToken ct = default)
+    {
+        if (_embeddings is null)
+        {
+            _logger.LogInformation("Re-embed skipped — no embedding service configured");
+            return new ReEmbedResult(Processed: 0, Failed: 0);
+        }
+
+        var processed = 0;
+        var failed = 0;
+
+        await _dbFactory.WithContextTransactionAsync(ctx, async (db, tx, token) =>
+        {
+            var rows = (await db.QueryAsync<Note>(new CommandDefinition(
+                "SELECT * FROM notes ORDER BY updated_at DESC",
+                transaction: tx, cancellationToken: token))).ToList();
+
+            foreach (var note in rows)
+            {
+                token.ThrowIfCancellationRequested();
+                var before = processed + failed;
+                try
+                {
+                    var text = BuildEmbeddingText(note);
+                    var vec = await _embeddings.EmbedAsync(text, token);
+                    var blob = new byte[vec.Length * sizeof(float)];
+                    Buffer.BlockCopy(vec, 0, blob, 0, blob.Length);
+
+                    await db.ExecuteAsync(new CommandDefinition(
+                        "DELETE FROM vec_notes WHERE id = @id",
+                        new { id = note.Id }, transaction: tx, cancellationToken: token));
+                    await db.ExecuteAsync(new CommandDefinition(
+                        "INSERT INTO vec_notes(id, embedding) VALUES (@id, @blob)",
+                        new { id = note.Id, blob }, transaction: tx, cancellationToken: token));
+                    processed++;
+                }
+                catch (EmbeddingUnavailableException)
+                {
+                    // Model went away mid-run. Leave the existing vector in
+                    // place (or none) and move on; the user can retry.
+                    _logger.LogDebug("Re-embed hit EmbeddingUnavailable on note {Id}; leaving existing row", note.Id);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Re-embed failed for note {Id}", note.Id);
+                    failed++;
+                }
+            }
+        }, ct);
+
+        _logger.LogInformation("Re-embed finished in {CtxType}:{CtxId} — processed={Processed} failed={Failed}",
+            ctx.Type, ctx.Id, processed, failed);
+
+        return new ReEmbedResult(processed, failed);
+    }
+
     // ────────── Legacy (personal-context) aliases ──────────
 
     public Task<Note?> GetByIdAsync(string userId, string id, CancellationToken ct = default)

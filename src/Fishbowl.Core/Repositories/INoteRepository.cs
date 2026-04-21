@@ -3,6 +3,13 @@ using Fishbowl.Core.Models;
 
 namespace Fishbowl.Core.Repositories;
 
+// Return shape for ReEmbedAllAsync. `Processed` = notes whose vector was
+// (re-)written; `Failed` = notes where the embedding call threw something
+// other than EmbeddingUnavailableException (see NoteRepository for the
+// swallow policy). Skipped-because-unavailable rows fall into neither
+// bucket and land on the next retry.
+public record ReEmbedResult(int Processed, int Failed);
+
 public interface INoteRepository
 {
     // Context-aware overloads. `actorUserId` is the user writing/creating —
@@ -23,6 +30,12 @@ public interface INoteRepository
     Task<bool> UpdateAsync(ContextRef ctx, Note note, CancellationToken ct = default);
     Task<bool> UpdateAsync(ContextRef ctx, Note note, NoteSource source, CancellationToken ct = default);
     Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default);
+
+    // Bulk re-embed: iterates every note in the context and re-runs the
+    // vec_notes upsert. Returns a result with processed + failed counts.
+    // Used by POST /api/v1/search/reindex on model upgrade or the first
+    // time embeddings become available for a pre-existing personal DB.
+    Task<ReEmbedResult> ReEmbedAllAsync(ContextRef ctx, CancellationToken ct = default);
 
     // Legacy (personal-context) aliases. Kept so existing cookie-auth call
     // sites stay minimal-diff. Implementations delegate to the ContextRef

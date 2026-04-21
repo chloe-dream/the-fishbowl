@@ -154,6 +154,44 @@ public class NoteRepositoryEmbeddingTests : IDisposable
     }
 
     [Fact]
+    public async Task ReEmbedAllAsync_ProcessesEveryNote()
+    {
+        var fake = new FakeEmbeddingService();
+        var repo = BuildRepo(fake);
+
+        for (var i = 0; i < 5; i++)
+        {
+            await repo.CreateAsync(_ctx, UserId,
+                new Note { Title = $"note-{i}", Content = $"body-{i}" },
+                TestContext.Current.CancellationToken);
+        }
+
+        // Create wrote 5 vectors → CallCount already at 5. Re-embed bumps
+        // it by another 5.
+        var baseline = fake.CallCount;
+        var result = await repo.ReEmbedAllAsync(_ctx, TestContext.Current.CancellationToken);
+
+        Assert.Equal(5, result.Processed);
+        Assert.Equal(0, result.Failed);
+        Assert.Equal(baseline + 5, fake.CallCount);
+
+        using var db = _factory.CreateContextConnection(_ctx);
+        var rowCount = await db.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM vec_notes");
+        Assert.Equal(5, rowCount);
+    }
+
+    [Fact]
+    public async Task ReEmbedAllAsync_WithoutEmbeddingService_IsNoop()
+    {
+        // Backward compat: repository constructed without an embedding
+        // service returns a zeroed result instead of throwing.
+        var repo = new NoteRepository(_factory, new TagRepository(_factory), embeddings: null);
+        var result = await repo.ReEmbedAllAsync(_ctx, TestContext.Current.CancellationToken);
+        Assert.Equal(0, result.Processed);
+        Assert.Equal(0, result.Failed);
+    }
+
+    [Fact]
     public async Task CreateAsync_WithoutEmbeddingService_StillSucceeds()
     {
         // Backward compat — cookie-auth call sites constructed before Task 5.3
