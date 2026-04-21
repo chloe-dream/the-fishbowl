@@ -6,6 +6,7 @@
     <ProjectReference Include="..\Fishbowl.Sync\Fishbowl.Sync.csproj" />
     <ProjectReference Include="..\Fishbowl.Scheduler\Fishbowl.Scheduler.csproj" />
     <ProjectReference Include="..\Fishbowl.Scripting\Fishbowl.Scripting.csproj" />
+    <ProjectReference Include="..\Fishbowl.Mcp\Fishbowl.Mcp.csproj" />
   </ItemGroup>
 
   <ItemGroup>

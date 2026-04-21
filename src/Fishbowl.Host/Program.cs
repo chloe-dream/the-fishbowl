@@ -12,6 +12,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using Fishbowl.Host;
 using Fishbowl.Host.Auth;
+using Fishbowl.Mcp.Endpoints;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -353,6 +354,7 @@ app.MapTodoApi();
 app.MapTeamsApi();
 app.MapApiKeysApi();
 app.MapAccountApi();
+app.MapMcpEndpoint();
 
 // Root route — gate the hub behind setup + authentication so the first click
 // on a tile doesn't dump an unconfigured user into /setup via a silent 401
