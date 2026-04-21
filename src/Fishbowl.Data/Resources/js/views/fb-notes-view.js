@@ -40,11 +40,20 @@ class FbNotesView extends HTMLElement {
      *  already live on each list row on hover, so the toolbar is reserved
      *  for view-scoped actions — tag management is the only one today. */
     _setViewToolbar() {
-        fb.toolbar.set([{
-            icon:    "settings",
-            title:   "Manage tags",
-            onClick: () => this._openManageDialog()
-        }]);
+        fb.toolbar.set([
+            // Manual refresh — placeholder until we wire auto-refresh to
+            // MCP writes landing. Order is left-to-right as rendered.
+            {
+                icon:    "sync",
+                title:   "Refresh notes",
+                onClick: () => this.loadNotes(),
+            },
+            {
+                icon:    "settings",
+                title:   "Manage tags",
+                onClick: () => this._openManageDialog(),
+            },
+        ]);
     }
 
     disconnectedCallback() {
@@ -236,6 +245,17 @@ class FbNotesView extends HTMLElement {
                     color: var(--text-muted);
                 }
                 fb-notes-view .nv-item-action.delete:hover { color: var(--danger); }
+                /* Approve: only rendered when the note carries review:pending.
+                   Green hover so it reads as the positive counterpart to the
+                   (red) delete button — same row, opposite semantics. */
+                fb-notes-view .nv-item-action.approve {
+                    opacity: 1;
+                    color: var(--accent-warm, #f59e0b);
+                }
+                fb-notes-view .nv-item-action.approve:hover {
+                    color: #22c55e;
+                    background: rgba(34, 197, 94, 0.14);
+                }
 
                 /* Archived rows (only shown when "show archived" is on) get
                    dimmed title + snippet so they're visually distinct from
@@ -686,6 +706,13 @@ class FbNotesView extends HTMLElement {
                 n.archived  ? "archived" : "",
             ].filter(Boolean).join(" ");
             const tagLine = this._renderRowTagLine(n.tags);
+            const isPending = (n.tags || []).includes("review:pending");
+            // Approve only surfaces when the note needs review. One click
+            // strips review:pending via the existing Human-update path
+            // (NoteRepository.ApplySourceTags does the strip server-side).
+            const approveBtnHtml = isPending
+                ? `<button class="nv-item-action approve" data-action="approve" title="Approve (clear review:pending)"><fb-icon name="check"></fb-icon></button>`
+                : "";
             return `
                 <div class="${rowClasses}" data-id="${n.id}">
                     <div class="nv-item-title-row">
@@ -697,6 +724,7 @@ class FbNotesView extends HTMLElement {
                     </div>
                     ${tagLine}
                     <div class="nv-item-actions">
+                        ${approveBtnHtml}
                         <button class="nv-item-action pin ${n.pinned ? "active" : ""}" data-action="pin" title="${pinTitle}"><fb-icon name="pin"></fb-icon></button>
                         <button class="nv-item-action archive ${n.archived ? "active" : ""}" data-action="archive" title="${archiveTitle}"><fb-icon name="archive"></fb-icon></button>
                         <button class="nv-item-action delete" data-action="delete" title="Delete"><fb-icon name="trash"></fb-icon></button>
@@ -715,6 +743,7 @@ class FbNotesView extends HTMLElement {
                     e.stopPropagation();
                     const id = el.dataset.id;
                     switch (btn.dataset.action) {
+                        case "approve": this.approveById(id);         break;
                         case "pin":     this.togglePinnedById(id);    break;
                         case "archive": this.toggleArchivedById(id);  break;
                         case "delete":  this.deleteById(id);          break;
@@ -895,6 +924,33 @@ class FbNotesView extends HTMLElement {
         } catch (err) {
             console.error("[fb-notes-view] archive toggle failed:", err);
             note.archived = !note.archived;
+        }
+    }
+
+    async approveById(id) {
+        // Editing is implicit approval; this button is just an explicit UX
+        // handle for users filtering on `review:pending`. Flush any pending
+        // autosave first so our tag change rides in the same PUT.
+        if (id === this.selectedId) await this.flushSave();
+
+        const note = this.notes.find(n => n.id === id);
+        if (!note || !(note.tags || []).includes("review:pending")) return;
+
+        const previousTags = [...note.tags];
+        note.tags = note.tags.filter(t => t !== "review:pending");
+        try {
+            await fb.api.notes.update(note.id, note);
+            // If the selected note just lost review:pending and the current
+            // filter selects that tag, it'll vanish from the list on the
+            // next render — renderList handles that. For the editor's
+            // tag-input we just re-apply the new list.
+            if (id === this.selectedId) {
+                this.querySelector("#tag-input").value = note.tags;
+            }
+            this.renderList();
+        } catch (err) {
+            console.error("[fb-notes-view] approve failed:", err);
+            note.tags = previousTags;
         }
     }
 
