@@ -39,6 +39,10 @@ public class DatabaseFactory
     // and team spaces share an identical schema and identical migrations —
     // CONCEPT.md § Teams is explicit that team DBs are structurally identical
     // to user DBs, so EnsureUserInitialized applies to both.
+    //
+    // Context connections also load sqlite-vec (`vec0`) before migrations run;
+    // v4 creates a `vec_notes` virtual table so the extension must be live
+    // during EnsureUserInitialized, not just at query time.
     public IDbConnection CreateContextConnection(ContextRef ctx)
     {
         var dbPath = ctx.Type switch
@@ -47,7 +51,7 @@ public class DatabaseFactory
             ContextType.Team => Path.Combine(_teamsPath, $"{ctx.Id}.db"),
             _ => throw new ArgumentException($"Unknown context type: {ctx.Type}", nameof(ctx)),
         };
-        return OpenAndInitialize(dbPath, EnsureUserInitialized);
+        return OpenAndInitialize(dbPath, EnsureUserInitialized, loadVec: true);
     }
 
     // Legacy entrypoint — kept so cookie-auth call sites (which only know a
@@ -57,7 +61,7 @@ public class DatabaseFactory
 
     public IDbConnection CreateSystemConnection()
     {
-        return OpenAndInitialize(_systemDbPath, EnsureSystemInitialized);
+        return OpenAndInitialize(_systemDbPath, EnsureSystemInitialized, loadVec: false);
     }
 
     public async Task WithContextTransactionAsync(
@@ -111,7 +115,7 @@ public class DatabaseFactory
         CancellationToken ct = default)
         => WithContextTransactionAsync(ContextRef.User(userId), work, ct);
 
-    private IDbConnection OpenAndInitialize(string dbPath, Action<IDbConnection> initializer)
+    private IDbConnection OpenAndInitialize(string dbPath, Action<IDbConnection> initializer, bool loadVec)
     {
         var connectionString = new SqliteConnectionStringBuilder
         {
@@ -121,6 +125,8 @@ public class DatabaseFactory
 
         var connection = new SqliteConnection(connectionString);
         connection.Open();
+
+        if (loadVec) SqliteVecLoader.LoadInto(connection);
 
         initializer(connection);
 
@@ -152,6 +158,7 @@ public class DatabaseFactory
             ApplyUserV3(connection);
             connection.Execute("PRAGMA user_version = 3");
             _logger.LogInformation("Applied user schema v3 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 3;
         }
         else
         {
@@ -160,6 +167,13 @@ public class DatabaseFactory
             // reconcile without bumping user_version — v3 stays the current
             // version until it ships. Harmless on a correct v3 DB.
             ReconcileUserV3(connection);
+        }
+
+        if (version < 4)
+        {
+            ApplyUserV4(connection);
+            connection.Execute("PRAGMA user_version = 4");
+            _logger.LogInformation("Applied user schema v4 to {DbPath}", ((SqliteConnection)connection).DataSource);
         }
     }
 
@@ -341,6 +355,30 @@ public class DatabaseFactory
             AddColumnIfMissing(connection, transaction, "tags", "user_removable",  "INTEGER NOT NULL DEFAULT 1");
 
             ReconcileSystemTagRows(connection, transaction);
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    // sqlite-vec virtual table — one row per note, 384-dim float embedding
+    // (MiniLM-L6-v2 output size). `id` mirrors `notes.id` so joins are direct.
+    // No backfill here: existing notes embed lazily on next write, or in bulk
+    // via the Settings "re-index all" action.
+    private void ApplyUserV4(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            connection.Execute(@"
+                CREATE VIRTUAL TABLE IF NOT EXISTS vec_notes USING vec0(
+                    id TEXT PRIMARY KEY,
+                    embedding FLOAT[384]
+                );", transaction: transaction);
+
             transaction.Commit();
         }
         catch

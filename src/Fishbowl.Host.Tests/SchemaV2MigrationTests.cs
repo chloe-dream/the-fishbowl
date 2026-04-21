@@ -54,11 +54,11 @@ public class SchemaV2MigrationTests : IDisposable
         var factory = new DatabaseFactory(_dataDir);
         using var db = factory.CreateConnection(userId);
 
-        // Factory chains v1 → v2 → v3. We're testing v2's backfill behaviour,
-        // but the factory always runs every pending migration on open, so the
-        // final user_version is CurrentVersion, not 2.
+        // Factory chains v1 → v2 → v3 → v4. We're testing v2's backfill
+        // behaviour, but the factory always runs every pending migration on
+        // open, so the final user_version is CurrentVersion, not 2.
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(3, version);
+        Assert.Equal(4, version);
 
         var noteCount = await db.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM notes");
         Assert.Equal(2, noteCount);
@@ -85,7 +85,7 @@ public class SchemaV2MigrationTests : IDisposable
         using var db = factory.CreateConnection("fresh-user");
 
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(3, version);
+        Assert.Equal(4, version);
 
         var tableExists = await db.ExecuteScalarAsync<long>(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='tags'");

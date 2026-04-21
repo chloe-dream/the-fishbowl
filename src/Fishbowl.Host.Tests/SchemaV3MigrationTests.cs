@@ -53,7 +53,7 @@ public class SchemaV3MigrationTests : IDisposable
         using var db = factory.CreateConnection(userId);
 
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(3, version);
+        Assert.Equal(4, version);
 
         // All three protection columns exist.
         var columns = (await db.QueryAsync<string>(
@@ -107,7 +107,7 @@ public class SchemaV3MigrationTests : IDisposable
         using var db = factory.CreateConnection("fresh-user");
 
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(3, version);
+        Assert.Equal(4, version);
 
         var rows = (await db.QueryAsync<(string Name, long IsSystem)>(
             "SELECT name AS Name, is_system AS IsSystem FROM tags ORDER BY name")).ToList();
