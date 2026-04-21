@@ -20,12 +20,31 @@ class FbNotesView extends HTMLElement {
         this.selectedId = null;
         this.showArchived = false;
         this.searchQuery = "";
+        // Tag filter is always AND ("match all"). The strip narrows itself
+        // after each click to only show tags that appear on the remaining
+        // notes (plus currently-selected ones), so no UI toggle is needed.
+        this.tagFilter = { tags: [] };
         this._saveDebounce = null;
+        this._onTagsInvalidated = () => this._renderTagFilter();
     }
 
     async connectedCallback() {
         this.render();
+        window.addEventListener("fb-tags-invalidated", this._onTagsInvalidated);
+        this._setViewToolbar();
         await this.loadNotes();
+        this._renderTagFilter();
+    }
+
+    /** Top-nav toolbar for this view. Per-note actions (pin/archive/delete)
+     *  already live on each list row on hover, so the toolbar is reserved
+     *  for view-scoped actions — tag management is the only one today. */
+    _setViewToolbar() {
+        fb.toolbar.set([{
+            icon:    "settings",
+            title:   "Manage tags",
+            onClick: () => this._openManageDialog()
+        }]);
     }
 
     disconnectedCallback() {
@@ -33,12 +52,16 @@ class FbNotesView extends HTMLElement {
         // Fire-and-forget any pending autosave so a quick view-switch mid-typing
         // doesn't drop edits.
         this.flushSave();
+        window.removeEventListener("fb-tags-invalidated", this._onTagsInvalidated);
         if (window.fb?.toolbar) fb.toolbar.clear();
     }
 
     async loadNotes() {
         try {
-            this.notes = await fb.api.notes.list();
+            const opts = this.tagFilter.tags.length > 0
+                ? { tags: this.tagFilter.tags, match: "all" }
+                : undefined;
+            this.notes = await fb.api.notes.list(opts);
             this.renderList();
         } catch (err) {
             console.error("[fb-notes-view] list failed:", err);
@@ -250,6 +273,36 @@ class FbNotesView extends HTMLElement {
                     font-size: 13px;
                 }
 
+                /* Per-row tag preview: single line, ellipsis-truncated, full
+                   list shown via title tooltip on hover. Coloured dots act as
+                   tag-aware glyphs without taking the space full chips would. */
+                fb-notes-view .nv-item-tagline {
+                    display: flex;
+                    align-items: center;
+                    gap: 4px;
+                    margin-top: 4px;
+                    font-size: 11px;
+                    color: var(--text-muted);
+                    overflow: hidden;
+                    white-space: nowrap;
+                    text-overflow: ellipsis;
+                    cursor: default;
+                }
+                fb-notes-view .nv-item-tagline .tag-dot {
+                    flex-shrink: 0;
+                    width: 7px; height: 7px;
+                    border-radius: 50%;
+                }
+                fb-notes-view .nv-item-tagline .tag-name {
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+                fb-notes-view .nv-item-tagline .tag-sep {
+                    opacity: 0.4;
+                    margin: 0 2px;
+                }
+                fb-notes-view .nv-item.archived .nv-item-tagline { opacity: 0.55; }
+
                 /* --- EDITOR PANE ---------------------------------------------- */
                 fb-notes-view .nv-editor-pane {
                     flex: 1;
@@ -273,11 +326,36 @@ class FbNotesView extends HTMLElement {
                 fb-notes-view .nv-editor-footer #timestamp {
                     font-variant-numeric: tabular-nums;
                 }
-                fb-notes-view .nv-editor-tags {
+                /* Dedicated band between body and footer for the tag input.
+                   Lives above the footer so the autocomplete dropdown opens
+                   downward into the footer's visual whitespace instead of
+                   covering editor content. */
+                fb-notes-view .nv-editor-tagbar {
                     display: flex;
+                    align-items: center;
+                    flex-wrap: wrap;
                     gap: 6px;
-                    /* Tag chips land here in a future change. */
+                    padding: 10px 20px;
+                    background: var(--panel);
+                    border-top: 1px solid var(--border);
+                    flex-shrink: 0;
+                    min-height: 44px;
                 }
+                fb-notes-view .nv-editor-tagbar fb-tag-input {
+                    flex: 1 1 200px;
+                    min-width: 200px;
+                }
+
+                /* --- TAG FILTER STRIP (list pane) ----------------------------- */
+                fb-notes-view .nv-tag-filter {
+                    display: flex;
+                    flex-wrap: wrap;
+                    align-items: center;
+                    gap: 4px;
+                    padding: 10px 12px 8px;
+                    border-bottom: 1px solid var(--border);
+                }
+                fb-notes-view .nv-tag-filter[hidden] { display: none !important; }
                 fb-notes-view .nv-editor-body {
                     flex: 1;
                     overflow: auto;
@@ -389,6 +467,7 @@ class FbNotesView extends HTMLElement {
                         <fb-icon name="search"></fb-icon>
                         <input type="search" id="search-input" placeholder="Search all notes"/>
                     </div>
+                    <div class="nv-tag-filter" id="tag-filter" hidden></div>
                     <div class="nv-list-header">
                         <span class="nv-list-title" id="list-title">All Notes</span>
                         <button class="nv-icon-btn" id="toggle-archived-btn" title="Show archived">
@@ -412,6 +491,9 @@ class FbNotesView extends HTMLElement {
                             <textarea id="content" class="nv-content-input" placeholder="Start writing..."></textarea>
                         </div>
                     </div>
+                    <section class="nv-editor-tagbar" id="tagbar" hidden>
+                        <fb-tag-input id="tag-input"></fb-tag-input>
+                    </section>
                     <footer class="nv-editor-footer" id="editor-footer" hidden>
                         <span class="nv-editor-footer-meta">
                             Updated <span id="timestamp"></span>
@@ -420,9 +502,6 @@ class FbNotesView extends HTMLElement {
                             <fb-icon name="archive"></fb-icon> Archived · Read-only
                         </span>
                         <div class="nv-editor-footer-spacer"></div>
-                        <div class="nv-editor-tags" id="tags">
-                            <!-- Tag chips land here in a future change. -->
-                        </div>
                     </footer>
                 </main>
             </div>
@@ -451,8 +530,97 @@ class FbNotesView extends HTMLElement {
             this.autosizeContent();
             this.scheduleAutoSave();
         });
+        const tagInput = this.querySelector("#tag-input");
+        tagInput.addEventListener("change", (e) => {
+            const note = this.notes.find(n => n.id === this.selectedId);
+            if (!note) return;
+            note.tags = [...e.detail];
+            this.scheduleAutoSave();
+        });
         // Pin + trash also live in fb-nav's toolbar (see updateToolbar) and on
         // each list row (see renderList's action buttons).
+    }
+
+    /** Render the per-tag chip strip. AND-only filter; the strip narrows
+     *  itself after each click to only show tags that still appear on at
+     *  least one of the currently-visible notes (so every chip is a
+     *  guaranteed-non-empty further filter). Currently-selected chips stay
+     *  visible regardless so the user can always deselect. */
+    async _renderTagFilter() {
+        const strip = this.querySelector("#tag-filter");
+        if (!strip) return;
+        let allTags = [];
+        try {
+            allTags = await fb.tags.all();
+        } catch {
+            allTags = [];
+        }
+
+        const selected = new Set(this.tagFilter.tags);
+        let visible;
+        if (selected.size === 0) {
+            // Initial state: tags with at least one referencing note.
+            visible = allTags.filter(t => (t.usageCount || 0) > 0);
+        } else {
+            // Filtered state: only tags reachable from the current result set
+            // (so clicking them is guaranteed to narrow further), plus the
+            // selected tags themselves so they can be deselected.
+            const reachable = new Set();
+            for (const note of this.notes) {
+                for (const name of (note.tags || [])) reachable.add(name);
+            }
+            visible = allTags.filter(t => reachable.has(t.name) || selected.has(t.name));
+        }
+
+        if (visible.length === 0) {
+            strip.hidden = true;
+            strip.innerHTML = "";
+            return;
+        }
+
+        strip.hidden = false;
+        strip.innerHTML = visible.map(t =>
+            `<fb-tag-chip name="${t.name}" color="${t.color}" clickable
+                          ${selected.has(t.name) ? "selected" : ""}></fb-tag-chip>`
+        ).join("");
+
+        strip.querySelectorAll("fb-tag-chip").forEach(chip => {
+            chip.addEventListener("click", async () => {
+                const name = chip.getAttribute("name");
+                if (selected.has(name)) {
+                    this.tagFilter.tags = this.tagFilter.tags.filter(t => t !== name);
+                } else {
+                    this.tagFilter.tags = [...this.tagFilter.tags, name];
+                }
+                // Order matters: load first so this.notes is fresh, then
+                // re-render the strip from the new result set.
+                await this.loadNotes();
+                this._renderTagFilter();
+            });
+        });
+    }
+
+    _openManageDialog() {
+        let dlg = this.querySelector("fb-tag-manage-dialog");
+        if (!dlg) {
+            dlg = document.createElement("fb-tag-manage-dialog");
+            this.appendChild(dlg);
+            dlg.addEventListener("tags-changed", async () => {
+                // Names/colors may have shifted; reload notes (and re-render
+                // chips on the active note) so stale chips don't linger.
+                await this.loadNotes();
+                this._renderTagFilter();
+                if (this.selectedId) {
+                    const refreshed = await fb.api.notes.get(this.selectedId).catch(() => null);
+                    if (refreshed) {
+                        const idx = this.notes.findIndex(n => n.id === this.selectedId);
+                        if (idx >= 0) this.notes[idx] = refreshed;
+                        this.querySelector("#tag-input").value = refreshed.tags || [];
+                    }
+                }
+            });
+        }
+        dlg.open();
     }
 
     /** Schedule an autosave after the user stops typing. */
@@ -476,25 +644,11 @@ class FbNotesView extends HTMLElement {
         el.style.height = el.scrollHeight + "px";
     }
 
-    /**
-     * Publish per-note actions to the global fb-nav toolbar. Called whenever
-     * a note becomes the active selection, or when the active note's pinned
-     * state changes.
-     */
-    updateToolbar(note) {
-        fb.toolbar.set([
-            {
-                icon:    "pin",
-                title:   note.pinned ? "Unpin" : "Pin to top",
-                active:  !!note.pinned,
-                onClick: () => this.togglePinned()
-            },
-            {
-                icon:    "trash",
-                title:   "Delete note",
-                onClick: () => this.deleteSelected()
-            }
-        ]);
+    /** Kept as a thin alias for per-note callers (select, togglePinned) so
+     *  the toolbar stays in sync with view state. Today the toolbar only
+     *  shows tag management, which doesn't depend on the active note. */
+    updateToolbar(_note) {
+        this._setViewToolbar();
     }
 
     renderList() {
@@ -531,6 +685,7 @@ class FbNotesView extends HTMLElement {
                 isSelected  ? "selected" : "",
                 n.archived  ? "archived" : "",
             ].filter(Boolean).join(" ");
+            const tagLine = this._renderRowTagLine(n.tags);
             return `
                 <div class="${rowClasses}" data-id="${n.id}">
                     <div class="nv-item-title-row">
@@ -540,6 +695,7 @@ class FbNotesView extends HTMLElement {
                         <span class="nv-item-date">${date}</span>
                         <span class="nv-item-snippet">${escapeHtml(snippet || "No additional text")}</span>
                     </div>
+                    ${tagLine}
                     <div class="nv-item-actions">
                         <button class="nv-item-action pin ${n.pinned ? "active" : ""}" data-action="pin" title="${pinTitle}"><fb-icon name="pin"></fb-icon></button>
                         <button class="nv-item-action archive ${n.archived ? "active" : ""}" data-action="archive" title="${archiveTitle}"><fb-icon name="archive"></fb-icon></button>
@@ -579,9 +735,11 @@ class FbNotesView extends HTMLElement {
         if (!note) return;
         this.querySelector("#editor-empty").hidden  = true;
         this.querySelector("#editor").hidden        = false;
+        this.querySelector("#tagbar").hidden        = false;
         this.querySelector("#editor-footer").hidden = false;
         this.querySelector("#title").value   = note.title   || "";
         this.querySelector("#content").value = note.content || "";
+        this.querySelector("#tag-input").value = note.tags || [];
         this.querySelector("#timestamp").textContent = this.formatFullTimestamp(note.updatedAt);
         this._applyReadOnly(note);
         this.updateToolbar(note);
@@ -607,9 +765,12 @@ class FbNotesView extends HTMLElement {
         this.selectedId = null;
         this.querySelector("#editor-empty").hidden  = false;
         this.querySelector("#editor").hidden        = true;
+        this.querySelector("#tagbar").hidden        = true;
         this.querySelector("#editor-footer").hidden = true;
         this.querySelector("#timestamp").textContent = "";
-        fb.toolbar.clear();
+        const tagInput = this.querySelector("#tag-input");
+        if (tagInput) tagInput.value = [];
+        // Toolbar stays — manage-tags is view-scoped, not per-note.
     }
 
     async saveSelected() {
@@ -621,13 +782,23 @@ class FbNotesView extends HTMLElement {
         if (!note) return;
         const newTitle   = this.querySelector("#title").value;
         const newContent = this.querySelector("#content").value;
-        if (newTitle === note.title && newContent === note.content) return;
+        const newTags    = this.querySelector("#tag-input").value;
+        const tagsChanged = !this._sameTags(note.tags || [], newTags);
+        if (newTitle === note.title && newContent === note.content && !tagsChanged) return;
         note.title   = newTitle;
         note.content = newContent;
+        note.tags    = newTags;
         try {
             await fb.api.notes.update(note.id, note);
             note.updatedAt = new Date().toISOString();
             this.querySelector("#timestamp").textContent = this.formatFullTimestamp(note.updatedAt);
+            if (tagsChanged) {
+                // A new tag may have been auto-registered server-side via
+                // EnsureExistsAsync; refresh the registry + filter strip so
+                // the new chip is selectable.
+                fb.tags.invalidate();
+                await this._renderTagFilter();
+            }
             // Update just this row in place — a full renderList() here would
             // wipe the list DOM mid-click and cause the user's click on
             // another row to be dropped (mousedown/mouseup land on different
@@ -639,7 +810,28 @@ class FbNotesView extends HTMLElement {
         }
     }
 
-    /** Refresh a single row's title/date/snippet without wiping the list DOM. */
+    _sameTags(a, b) {
+        if (a.length !== b.length) return false;
+        const sa = [...a].sort(), sb = [...b].sort();
+        for (let i = 0; i < sa.length; i++) if (sa[i] !== sb[i]) return false;
+        return true;
+    }
+
+    /** Build the per-row tag preview HTML. Returns "" when there are no tags
+     *  (so the row stays compact). Tags render as a coloured dot + name on a
+     *  single ellipsis-truncated line; full list goes in the title tooltip. */
+    _renderRowTagLine(tags) {
+        if (!tags || tags.length === 0) return "";
+        const tooltip = tags.join(", ");
+        const parts = tags.map((name, i) => {
+            const color = `var(--tag-${fb.tags.colorFor(name)}, var(--tag-gray))`;
+            const sep = i === 0 ? "" : `<span class="tag-sep">·</span>`;
+            return `${sep}<span class="tag-dot" style="background:${color}"></span><span class="tag-name">${escapeHtml(name)}</span>`;
+        }).join("");
+        return `<div class="nv-item-tagline" title="${escapeHtml(tooltip)}">${parts}</div>`;
+    }
+
+    /** Refresh a single row's title/date/snippet/tags without wiping the list DOM. */
     _updateRowInPlace(note) {
         const row = this.querySelector(`.nv-item[data-id="${note.id}"]`);
         if (!row) return;
@@ -651,6 +843,14 @@ class FbNotesView extends HTMLElement {
         if (snippetEl) {
             const snippet = (note.content || "").replace(/\s+/g, " ").slice(0, 80);
             snippetEl.textContent = snippet || "No additional text";
+        }
+        // Replace (or insert) the tagline so colors/names update on save.
+        const existing = row.querySelector(".nv-item-tagline");
+        if (existing) existing.remove();
+        const tagHtml = this._renderRowTagLine(note.tags || []);
+        if (tagHtml) {
+            const actions = row.querySelector(".nv-item-actions");
+            actions.insertAdjacentHTML("beforebegin", tagHtml);
         }
     }
 

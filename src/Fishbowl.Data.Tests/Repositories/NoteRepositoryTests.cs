@@ -21,7 +21,8 @@ public class NoteRepositoryTests : IDisposable
         _tempDbDir = Path.Combine(Path.GetTempPath(), "fishbowl_repo_tests_" + Path.GetRandomFileName());
         Directory.CreateDirectory(_tempDbDir);
         _dbFactory = new DatabaseFactory(_tempDbDir);
-        _repo = new NoteRepository(_dbFactory);
+        var tagRepo = new TagRepository(_dbFactory);
+        _repo = new NoteRepository(_dbFactory, tagRepo);
     }
 
     [Fact]

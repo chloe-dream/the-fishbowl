@@ -1,6 +1,8 @@
 using System.Data;
 using Microsoft.Data.Sqlite;
 using Dapper;
+using Fishbowl.Core;
+using Fishbowl.Core.Util;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -10,6 +12,7 @@ public class DatabaseFactory
 {
     private readonly string _dataRoot;
     private readonly string _usersPath;
+    private readonly string _teamsPath;
     private readonly string _systemDbPath;
     private readonly ILogger<DatabaseFactory> _logger;
 
@@ -25,31 +28,44 @@ public class DatabaseFactory
         // Ensure absolute or relative path is handled correctly
         _dataRoot = Path.GetFullPath(dataRoot);
         _usersPath = Path.Combine(_dataRoot, "users");
+        _teamsPath = Path.Combine(_dataRoot, "teams");
         _systemDbPath = Path.Combine(_dataRoot, "system.db");
 
-        if (!Directory.Exists(_usersPath))
-        {
-            Directory.CreateDirectory(_usersPath);
-        }
+        if (!Directory.Exists(_usersPath)) Directory.CreateDirectory(_usersPath);
+        if (!Directory.Exists(_teamsPath)) Directory.CreateDirectory(_teamsPath);
     }
 
-    public IDbConnection CreateConnection(string userId)
+    // Preferred primary entrypoint: one context resolves to one file. Personal
+    // and team spaces share an identical schema and identical migrations —
+    // CONCEPT.md § Teams is explicit that team DBs are structurally identical
+    // to user DBs, so EnsureUserInitialized applies to both.
+    public IDbConnection CreateContextConnection(ContextRef ctx)
     {
-        var dbPath = Path.Combine(_usersPath, $"{userId}.db");
+        var dbPath = ctx.Type switch
+        {
+            ContextType.User => Path.Combine(_usersPath, $"{ctx.Id}.db"),
+            ContextType.Team => Path.Combine(_teamsPath, $"{ctx.Id}.db"),
+            _ => throw new ArgumentException($"Unknown context type: {ctx.Type}", nameof(ctx)),
+        };
         return OpenAndInitialize(dbPath, EnsureUserInitialized);
     }
+
+    // Legacy entrypoint — kept so cookie-auth call sites (which only know a
+    // userId) stay minimal-diff. Delegates to the context-aware method.
+    public IDbConnection CreateConnection(string userId)
+        => CreateContextConnection(ContextRef.User(userId));
 
     public IDbConnection CreateSystemConnection()
     {
         return OpenAndInitialize(_systemDbPath, EnsureSystemInitialized);
     }
 
-    public async Task WithUserTransactionAsync(
-        string userId,
+    public async Task WithContextTransactionAsync(
+        ContextRef ctx,
         Func<IDbConnection, IDbTransaction, CancellationToken, Task> work,
         CancellationToken ct = default)
     {
-        using var db = CreateConnection(userId);
+        using var db = CreateContextConnection(ctx);
         using var tx = db.BeginTransaction();
         try
         {
@@ -63,12 +79,12 @@ public class DatabaseFactory
         }
     }
 
-    public async Task<T> WithUserTransactionAsync<T>(
-        string userId,
+    public async Task<T> WithContextTransactionAsync<T>(
+        ContextRef ctx,
         Func<IDbConnection, IDbTransaction, CancellationToken, Task<T>> work,
         CancellationToken ct = default)
     {
-        using var db = CreateConnection(userId);
+        using var db = CreateContextConnection(ctx);
         using var tx = db.BeginTransaction();
         try
         {
@@ -82,6 +98,18 @@ public class DatabaseFactory
             throw;
         }
     }
+
+    public Task WithUserTransactionAsync(
+        string userId,
+        Func<IDbConnection, IDbTransaction, CancellationToken, Task> work,
+        CancellationToken ct = default)
+        => WithContextTransactionAsync(ContextRef.User(userId), work, ct);
+
+    public Task<T> WithUserTransactionAsync<T>(
+        string userId,
+        Func<IDbConnection, IDbTransaction, CancellationToken, Task<T>> work,
+        CancellationToken ct = default)
+        => WithContextTransactionAsync(ContextRef.User(userId), work, ct);
 
     private IDbConnection OpenAndInitialize(string dbPath, Action<IDbConnection> initializer)
     {
@@ -108,6 +136,30 @@ public class DatabaseFactory
             ApplyUserInitialSchema(connection);
             connection.Execute("PRAGMA user_version = 1");
             _logger.LogInformation("Applied user schema v1 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 1;
+        }
+
+        if (version < 2)
+        {
+            ApplyUserV2(connection);
+            connection.Execute("PRAGMA user_version = 2");
+            _logger.LogInformation("Applied user schema v2 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 2;
+        }
+
+        if (version < 3)
+        {
+            ApplyUserV3(connection);
+            connection.Execute("PRAGMA user_version = 3");
+            _logger.LogInformation("Applied user schema v3 to {DbPath}", ((SqliteConnection)connection).DataSource);
+        }
+        else
+        {
+            // V3 was reshaped during pre-commit iteration (three-flag model,
+            // new seed set). If this DB was opened against an older v3 shape,
+            // reconcile without bumping user_version — v3 stays the current
+            // version until it ships. Harmless on a correct v3 DB.
+            ReconcileUserV3(connection);
         }
     }
 
@@ -120,6 +172,14 @@ public class DatabaseFactory
             ApplySystemInitialSchema(connection);
             connection.Execute("PRAGMA user_version = 1");
             _logger.LogInformation("Applied system schema v1");
+            version = 1;
+        }
+
+        if (version < 2)
+        {
+            ApplySystemV2(connection);
+            connection.Execute("PRAGMA user_version = 2");
+            _logger.LogInformation("Applied system schema v2");
         }
     }
 
@@ -206,6 +266,192 @@ public class DatabaseFactory
                     content,
                     tags
                 );", transaction: transaction);
+
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    private void ApplyUserV2(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            // Tag metadata: notes still hold tag *names* in their JSON `tags`
+            // column; this table adds per-tag presentation (color slot) and
+            // makes "list all tags" cheap.
+            connection.Execute(@"
+                CREATE TABLE IF NOT EXISTS tags (
+                    name        TEXT PRIMARY KEY,
+                    color       TEXT NOT NULL,
+                    created_at  TEXT NOT NULL
+                );", transaction: transaction);
+
+            // Backfill from existing notes' JSON tags arrays so v1 users keep
+            // the tags they already have and get deterministic default colors.
+            var existing = connection.Query<string>(
+                @"SELECT DISTINCT je.value
+                  FROM notes, json_each(notes.tags) je
+                  WHERE je.value IS NOT NULL AND je.value != ''",
+                transaction: transaction).ToList();
+
+            var now = DateTime.UtcNow.ToString("o");
+            foreach (var name in existing)
+            {
+                connection.Execute(
+                    "INSERT OR IGNORE INTO tags(name, color, created_at) VALUES (@name, @color, @createdAt)",
+                    new { name, color = TagPalette.DefaultFor(name), createdAt = now },
+                    transaction: transaction);
+            }
+
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    private void ApplyUserV3(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            // Three independent per-tag flags (see Fishbowl.Core.Util.SystemTags):
+            //  is_system       — name is load-bearing; rename/delete rejected.
+            //  user_assignable — UI dropdown offers this tag to pick. When 0,
+            //                    only system/MCP writes can attach it to a note.
+            //  user_removable  — fb-tag-chip renders a × for this tag. When 0,
+            //                    the tag is locked onto whatever note holds it.
+            AddColumnIfMissing(connection, transaction, "tags", "is_system",       "INTEGER NOT NULL DEFAULT 0");
+            AddColumnIfMissing(connection, transaction, "tags", "user_assignable", "INTEGER NOT NULL DEFAULT 1");
+            AddColumnIfMissing(connection, transaction, "tags", "user_removable",  "INTEGER NOT NULL DEFAULT 1");
+
+            ReconcileSystemTagRows(connection, transaction);
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    // Idempotent: runs on every open of an already-v3 DB. Safe because it
+    // only touches system-tagged rows and reconciles them against the current
+    // SystemTags.Seeds. Drops the `is_system` flag from any stale reserved
+    // names that were seeded by an earlier v3 iteration — they become regular
+    // user tags that can be renamed/deleted normally.
+    private void ReconcileUserV3(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            // If a pre-reshape v3 only added `is_system`, fill in the other two.
+            AddColumnIfMissing(connection, transaction, "tags", "user_assignable", "INTEGER NOT NULL DEFAULT 1");
+            AddColumnIfMissing(connection, transaction, "tags", "user_removable",  "INTEGER NOT NULL DEFAULT 1");
+
+            ReconcileSystemTagRows(connection, transaction);
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    private static void AddColumnIfMissing(
+        IDbConnection connection, IDbTransaction tx, string table, string column, string ddlType)
+    {
+        var exists = connection.ExecuteScalar<long>(
+            $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = @col",
+            new { col = column }, transaction: tx);
+        if (exists == 0)
+        {
+            connection.Execute($"ALTER TABLE {table} ADD COLUMN {column} {ddlType}", transaction: tx);
+        }
+    }
+
+    private static void ReconcileSystemTagRows(IDbConnection connection, IDbTransaction tx)
+    {
+        var now = DateTime.UtcNow.ToString("o");
+        var reserved = Fishbowl.Core.Util.SystemTags.ReservedNames;
+
+        // Demote any existing is_system rows whose names are no longer in the
+        // reserved set (stale iteration artefacts become regular user tags).
+        connection.Execute(@"
+            UPDATE tags SET is_system = 0, user_assignable = 1, user_removable = 1
+            WHERE is_system = 1 AND name NOT IN @reserved",
+            new { reserved }, transaction: tx);
+
+        // Upsert each current seed into the correct shape.
+        foreach (var spec in Fishbowl.Core.Util.SystemTags.Seeds)
+        {
+            connection.Execute(
+                @"INSERT OR IGNORE INTO tags(name, color, created_at, is_system, user_assignable, user_removable)
+                  VALUES (@name, @color, @createdAt, 1, @assign, @remove)",
+                new
+                {
+                    name = spec.Name,
+                    color = spec.Color,
+                    createdAt = now,
+                    assign = spec.UserAssignable ? 1 : 0,
+                    remove = spec.UserRemovable ? 1 : 0
+                }, transaction: tx);
+            connection.Execute(
+                @"UPDATE tags SET is_system = 1, user_assignable = @assign, user_removable = @remove
+                  WHERE name = @name",
+                new
+                {
+                    name = spec.Name,
+                    assign = spec.UserAssignable ? 1 : 0,
+                    remove = spec.UserRemovable ? 1 : 0
+                }, transaction: tx);
+        }
+    }
+
+    private void ApplySystemV2(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            // Teams: shared workspaces with their own fixed-schema .db file
+            // under `fishbowl-data/teams/{id}.db`. Slug is URL-safe, unique
+            // per-deployment (a single Fishbowl instance can't have two teams
+            // named 'fishbowl-dev').
+            connection.Execute(@"
+                CREATE TABLE IF NOT EXISTS teams (
+                    id          TEXT PRIMARY KEY,
+                    slug        TEXT NOT NULL UNIQUE,
+                    name        TEXT NOT NULL,
+                    created_by  TEXT NOT NULL REFERENCES users(id),
+                    created_at  TEXT NOT NULL
+                );", transaction: transaction);
+
+            // Membership + role. Composite PK = (team, user). CHECK constraint
+            // mirrors TeamRole enum in Fishbowl.Core.Models — keep the two in
+            // sync.
+            connection.Execute(@"
+                CREATE TABLE IF NOT EXISTS team_members (
+                    team_id    TEXT NOT NULL REFERENCES teams(id),
+                    user_id    TEXT NOT NULL REFERENCES users(id),
+                    role       TEXT NOT NULL CHECK(role IN ('readonly','member','admin','owner')),
+                    joined_at  TEXT NOT NULL,
+                    PRIMARY KEY (team_id, user_id)
+                );", transaction: transaction);
+
+            // Hot-path queries: "what teams am I in?" and "is this user in
+            // this team?". The composite PK covers team-side lookups; this
+            // index covers user-side lookups.
+            connection.Execute(
+                "CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id)",
+                transaction: transaction);
 
             transaction.Commit();
         }

@@ -13,14 +13,22 @@ public static class NotesApi
     {
         var group = routes.MapGroup("/api/v1/notes");
 
-        group.MapGet("/", async (ClaimsPrincipal user, INoteRepository repo, CancellationToken ct) =>
+        group.MapGet("/", async (
+            string[]? tag,
+            string? match,
+            ClaimsPrincipal user,
+            INoteRepository repo,
+            CancellationToken ct) =>
         {
             var userId = user.FindFirst("fishbowl_user_id")?.Value;
             if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
-            return Results.Ok(await repo.GetAllAsync(userId, ct));
+
+            var tags = tag is { Length: > 0 } ? tag : null;
+            var matchMode = match == "all" ? "all" : "any";
+            return Results.Ok(await repo.GetAllAsync(userId, tags, matchMode, ct));
         })
         .WithName("ListNotes")
-        .WithSummary("Lists all notes for the authenticated user.")
+        .WithSummary("Lists notes for the authenticated user. Optional ?tag=foo&tag=bar&match=any|all filter.")
         .Produces<IEnumerable<Note>>()
         .Produces(StatusCodes.Status401Unauthorized);
 

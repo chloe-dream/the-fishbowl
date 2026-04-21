@@ -50,9 +50,11 @@ public class DatabaseFactoryTests : IDisposable
         Assert.Contains("users", tables);
         Assert.Contains("user_mappings", tables);
         Assert.Contains("system_config", tables);
+        Assert.Contains("teams", tables);
+        Assert.Contains("team_members", tables);
 
         var version = connection.ExecuteScalar<long>("PRAGMA user_version");
-        Assert.Equal(1, version);
+        Assert.Equal(2, version);
     }
 
     [Fact]
@@ -87,7 +89,7 @@ public class DatabaseFactoryTests : IDisposable
 
         // Assert
         var version = connection.ExecuteScalar<int>("PRAGMA user_version");
-        Assert.Equal(1, version);
+        Assert.Equal(3, version);
     }
 
     [Fact]

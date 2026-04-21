@@ -30,8 +30,10 @@ builder.Services.AddSingleton<DatabaseFactory>(sp =>
 
 // Register Repositories
 builder.Services.AddScoped<ISystemRepository, SystemRepository>();
+builder.Services.AddScoped<ITagRepository, TagRepository>();
 builder.Services.AddScoped<INoteRepository, NoteRepository>();
 builder.Services.AddScoped<ITodoRepository, TodoRepository>();
+builder.Services.AddScoped<ITeamRepository, TeamRepository>();
 
 // Load plugins from configured path (defaults to fishbowl-mods/plugins)
 var pluginsPath = builder.Configuration["Plugins:Path"] ?? "fishbowl-mods/plugins";
@@ -84,8 +86,8 @@ authBuilder.AddGoogle(options =>
 
         if (string.IsNullOrEmpty(providerId)) return;
 
-        var name   = context.Principal?.FindFirstValue(ClaimTypes.Name);
-        var email  = context.Principal?.FindFirstValue(ClaimTypes.Email);
+        var name = context.Principal?.FindFirstValue(ClaimTypes.Name);
+        var email = context.Principal?.FindFirstValue(ClaimTypes.Email);
         var avatar = context.Principal?.FindFirstValue("urn:google:image");
 
         var internalUserId = await repo.GetUserIdByMappingAsync(provider, providerId);
@@ -320,7 +322,9 @@ app.MapGet("/logout", async (HttpContext context) =>
 // Register API Endpoints
 app.MapVersionApi();
 app.MapNotesApi();
+app.MapTagsApi();
 app.MapTodoApi();
+app.MapTeamsApi();
 app.MapAccountApi();
 
 // Root route — gate the hub behind setup + authentication so the first click

@@ -41,9 +41,38 @@
         delete: (id)      => request(`/${resource}/${encodeURIComponent(id)}`, { method: "DELETE" })
     });
 
+    // Notes list accepts an optional filter: { tags?: string[], match?: 'any'|'all' }.
+    // Repeated `tag` query params follow the server's IReadOnlyCollection<string>
+    // binding; absent params leave the server defaults (no filter, match=any).
+    function listNotes(opts) {
+        if (!opts || !opts.tags || opts.tags.length === 0) return request("/notes");
+        const qs = new URLSearchParams();
+        for (const t of opts.tags) qs.append("tag", t);
+        if (opts.match === "all") qs.set("match", "all");
+        return request(`/notes?${qs.toString()}`);
+    }
+
+    const notes = crud("notes");
+    notes.list = listNotes;
+
     fb.api = {
-        notes: crud("notes"),
+        notes,
         todos: crud("todos"),
+        tags: {
+            list:        ()                  => request("/tags"),
+            upsertColor: (name, color)       => request(`/tags/${encodeURIComponent(name)}`,
+                                                        { method: "PUT", body: JSON.stringify({ color }) }),
+            rename:      (name, newName)     => request(`/tags/${encodeURIComponent(name)}/rename`,
+                                                        { method: "POST", body: JSON.stringify({ newName }) }),
+            delete:      (name)              => request(`/tags/${encodeURIComponent(name)}`,
+                                                        { method: "DELETE" })
+        },
+        teams: {
+            list:   ()       => request("/teams"),
+            get:    (slug)   => request(`/teams/${encodeURIComponent(slug)}`),
+            create: ({ name }) => request("/teams", { method: "POST", body: JSON.stringify({ name }) }),
+            delete: (slug)   => request(`/teams/${encodeURIComponent(slug)}`, { method: "DELETE" }),
+        },
         version: () => request("/version"),
         providers: () => fetch("/api/auth/providers").then(r => r.json()),
         me: {

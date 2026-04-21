@@ -16,6 +16,20 @@
     --text-muted:   #64748b;
     --glass:        rgba(15, 23, 42, 0.7);
     --bg-dark:      #000000;
+
+    /* Tag palette. Slot names mirror Fishbowl.Core.Util.TagPalette.Slots so the
+       backend can store names instead of hex and a future theme can shift the
+       palette without rewriting persisted tag colors. */
+    --tag-blue:     #3b82f6;
+    --tag-orange:   #f97316;
+    --tag-red:      #ef4444;
+    --tag-green:    #10b981;
+    --tag-purple:   #8b5cf6;
+    --tag-pink:     #ec4899;
+    --tag-yellow:   #eab308;
+    --tag-teal:     #14b8a6;
+    --tag-gray:     #64748b;
+    --tag-indigo:   #6366f1;
 }
 
 /* Modern themed scrollbars — global.
