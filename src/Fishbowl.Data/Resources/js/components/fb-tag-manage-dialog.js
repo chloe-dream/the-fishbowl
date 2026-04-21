@@ -2,7 +2,9 @@
  * <fb-tag-manage-dialog>
  *
  * Inline tag administration. Lists every tag with an inline rename input, a
- * 10-swatch picker, and a delete button. Wraps fb-dialog for the modal shell.
+ * 10-swatch picker, and a delete button. Uses fb-window as the shell so the
+ * red close button + bottom-right resize handle match every other floating
+ * panel in the app (Profile, etc.) — no reinvented chrome.
  *
  * Usage:
  *   const dlg = document.createElement("fb-tag-manage-dialog");
@@ -27,63 +29,16 @@ class FbTagManageDialog extends HTMLElement {
     async open() {
         this._dirty = false;
         await this._refreshList();
-        this._dialog.open();
+        this._window.open();
     }
 
     _render() {
         this.shadowRoot.innerHTML = `
             <style>
                 :host { display: contents; }
-                /* Widen fb-dialog's panel. resize is JS-driven (see
-                   _attachResize) so the rounded corners stay rounded — the
-                   browser's native handle would clip the bottom-right radius. */
-                fb-dialog::part(panel) {
-                    width: 640px;
-                    min-width: 420px;
-                    max-width: calc(100vw - 32px);
-                    max-height: calc(100vh - 48px);
-                }
-                .list {
-                    max-height: 50vh;
-                    overflow-y: auto;
-                    margin: 0 -4px;
-                }
-                /* Close X — slotted; positions inside fb-dialog's .panel
-                   because that's the closest positioned ancestor in the
-                   flattened layout tree. */
-                .close-x {
-                    position: absolute;
-                    top: 12px;
-                    right: 12px;
-                    width: 28px; height: 28px;
-                    display: flex; align-items: center; justify-content: center;
-                    background: transparent;
-                    border: none;
-                    border-radius: 6px;
-                    color: var(--text-muted, #64748b);
-                    cursor: pointer;
-                    transition: background 100ms, color 100ms;
-                    padding: 0;
-                    z-index: 2;
-                }
-                .close-x:hover { color: var(--text, #f8fafc); background: rgba(255, 255, 255, 0.08); }
-                .close-x svg { width: 16px; height: 16px; display: block; }
-                /* Custom resize handle — slotted, positioned in the panel's
-                   bottom-right with diagonal grip lines. JS in _attachResize
-                   wires mousedown to drag-resize the panel. */
-                .resize-handle {
-                    position: absolute;
-                    bottom: 6px; right: 6px;
-                    width: 16px; height: 16px;
-                    cursor: nwse-resize;
-                    opacity: 0.45;
-                    transition: opacity 120ms;
-                    z-index: 2;
-                    background:
-                        linear-gradient(135deg, transparent 0 60%, currentColor 60% 70%, transparent 70% 80%, currentColor 80% 90%, transparent 90%) no-repeat;
-                    color: var(--text-muted, #64748b);
-                }
-                .resize-handle:hover { opacity: 0.9; }
+                /* fb-window's .content already scrolls + pads — .list just
+                   lays out the rows. No nested scrollbar, no inner padding. */
+                .list { }
                 .list:empty::after {
                     content: "no tags yet";
                     display: block;
@@ -168,64 +123,27 @@ class FbTagManageDialog extends HTMLElement {
                     flex-shrink: 0;
                 }
             </style>
-            <fb-dialog title="Manage tags" id="dlg">
-                <button class="close-x" type="button" id="close-x" title="Close" aria-label="Close">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-                        <line x1="18" y1="6" x2="6" y2="18"/>
-                        <line x1="6" y1="6" x2="18" y2="18"/>
-                    </svg>
-                </button>
+            <fb-window
+                id="win"
+                title="Manage tags"
+                width="640px"
+                height="480px"
+                top="80px"
+                left="calc(50vw - 320px)">
                 <div class="list" id="list"></div>
-                <div class="resize-handle" id="resize" title="Drag to resize"></div>
-            </fb-dialog>
+            </fb-window>
         `;
-        this._dialog = this.shadowRoot.getElementById("dlg");
-        this._dialog.buttons = [{ action: "close", label: "Done", kind: "primary" }];
+        this._window = this.shadowRoot.getElementById("win");
         this._listEl = this.shadowRoot.getElementById("list");
 
-        this.shadowRoot.getElementById("close-x").addEventListener("click", () => {
-            this._dialog.close(null);
-        });
-
-        this._attachResize();
-
-        this._dialog.addEventListener("fb-dialog:action", () => {
+        // fb-window fires 'close' when its red close button is clicked. Emit
+        // the tags-changed signal here so views can refresh in one shot
+        // rather than after every per-row mutation.
+        this._window.addEventListener("close", () => {
             if (this._dirty) {
                 fb.tags.invalidate();
                 this.dispatchEvent(new CustomEvent("tags-changed", { bubbles: true, composed: true }));
             }
-        });
-    }
-
-    /** JS-driven resize so we can keep the panel's rounded corners. The
-     *  handle is slotted into fb-dialog; we reach into fb-dialog's shadow to
-     *  size the panel directly. Drag with mousedown → mousemove → mouseup. */
-    _attachResize() {
-        const handle = this.shadowRoot.getElementById("resize");
-        const panel = this._dialog.shadowRoot.querySelector(".panel");
-        if (!handle || !panel) return;
-
-        handle.addEventListener("mousedown", (e) => {
-            e.preventDefault();
-            const startX = e.clientX, startY = e.clientY;
-            const rect = panel.getBoundingClientRect();
-            const startW = rect.width, startH = rect.height;
-            const minW = 420, minH = 240;
-            const maxW = window.innerWidth - 32;
-            const maxH = window.innerHeight - 48;
-
-            const onMove = (ev) => {
-                const w = Math.min(maxW, Math.max(minW, startW + (ev.clientX - startX)));
-                const h = Math.min(maxH, Math.max(minH, startH + (ev.clientY - startY)));
-                panel.style.width = `${w}px`;
-                panel.style.height = `${h}px`;
-            };
-            const onUp = () => {
-                document.removeEventListener("mousemove", onMove);
-                document.removeEventListener("mouseup", onUp);
-            };
-            document.addEventListener("mousemove", onMove);
-            document.addEventListener("mouseup", onUp);
         });
     }
 
