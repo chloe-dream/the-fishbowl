@@ -19,7 +19,9 @@ public interface INoteRepository
         CancellationToken ct = default);
 
     Task<string> CreateAsync(ContextRef ctx, string actorUserId, Note note, CancellationToken ct = default);
+    Task<string> CreateAsync(ContextRef ctx, string actorUserId, Note note, NoteSource source, CancellationToken ct = default);
     Task<bool> UpdateAsync(ContextRef ctx, Note note, CancellationToken ct = default);
+    Task<bool> UpdateAsync(ContextRef ctx, Note note, NoteSource source, CancellationToken ct = default);
     Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default);
 
     // Legacy (personal-context) aliases. Kept so existing cookie-auth call

@@ -304,17 +304,114 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
             doc.RootElement.GetProperty("error").GetProperty("code").GetInt32());
     }
 
+    // ────────── auto-tagging (Task 4.4) ──────────
+
+    [Fact]
+    public async Task Remember_AutoTagsSourceMcpAndReviewPending()
+    {
+        var client = await BearerClientAsync("read:notes", "write:notes");
+
+        var resp = await CallToolAsync(client, "remember", new { title = "tagged-on-create" });
+        var text = resp.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString();
+        using var doc = JsonDocument.Parse(text!);
+        var tags = doc.RootElement.GetProperty("note").GetProperty("tags")
+            .EnumerateArray().Select(t => t.GetString()).ToHashSet();
+
+        Assert.Contains("source:mcp", tags);
+        Assert.Contains("review:pending", tags);
+    }
+
+    [Fact]
+    public async Task Update_ViaMcp_ReAddsReviewPending()
+    {
+        var client = await BearerClientAsync("read:notes", "write:notes");
+
+        var created = await CallToolAsync(client, "remember",
+            new { title = "to-edit", tags = new[] { "custom" } });
+        var createdText = created.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString();
+        using var createdDoc = JsonDocument.Parse(createdText!);
+        var id = createdDoc.RootElement.GetProperty("id").GetString();
+
+        // A human approving the note would strip review:pending. Simulate
+        // that here by hitting the cookie-authed REST path via the repo,
+        // then re-updating through MCP to verify it re-adds the tag.
+        var repo = new Fishbowl.Data.Repositories.NoteRepository(_dbFactory,
+            new Fishbowl.Data.Repositories.TagRepository(_dbFactory));
+        var asHuman = await repo.GetByIdAsync(AliceId, id!, TestContext.Current.CancellationToken);
+        await repo.UpdateAsync(AliceId, asHuman!, TestContext.Current.CancellationToken);
+        var afterHuman = await repo.GetByIdAsync(AliceId, id!, TestContext.Current.CancellationToken);
+        Assert.DoesNotContain("review:pending", afterHuman!.Tags);
+
+        // Now MCP updates → review:pending comes back.
+        var updated = await CallToolAsync(client, "update_memory",
+            new { id, content = "edited via mcp" });
+        var updatedText = updated.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString();
+        using var updatedDoc = JsonDocument.Parse(updatedText!);
+        var tags = updatedDoc.RootElement.GetProperty("note").GetProperty("tags")
+            .EnumerateArray().Select(t => t.GetString()).ToHashSet();
+        Assert.Contains("review:pending", tags);
+        Assert.Contains("source:mcp", tags);
+    }
+
+    [Fact]
+    public async Task HumanEdit_StripsReviewPending()
+    {
+        // Seed a note that already has review:pending, simulating a prior
+        // MCP write. Update via the repo with NoteSource.Human → tag gone.
+        var repo = new Fishbowl.Data.Repositories.NoteRepository(_dbFactory,
+            new Fishbowl.Data.Repositories.TagRepository(_dbFactory));
+        var id = await repo.CreateAsync(
+            new ContextRef(ContextType.User, AliceId), AliceId,
+            new Fishbowl.Core.Models.Note
+            {
+                Title = "mcp-flagged",
+                Tags = new List<string> { "source:mcp", "review:pending" },
+            },
+            Fishbowl.Core.Models.NoteSource.Mcp,
+            TestContext.Current.CancellationToken);
+
+        var note = await repo.GetByIdAsync(AliceId, id, TestContext.Current.CancellationToken);
+        Assert.Contains("review:pending", note!.Tags);
+
+        note.Title = "edited by human";
+        await repo.UpdateAsync(
+            new ContextRef(ContextType.User, AliceId), note,
+            Fishbowl.Core.Models.NoteSource.Human,
+            TestContext.Current.CancellationToken);
+
+        var after = await repo.GetByIdAsync(AliceId, id, TestContext.Current.CancellationToken);
+        Assert.DoesNotContain("review:pending", after!.Tags);
+    }
+
+    [Fact]
+    public async Task CookieWrite_DoesNotAddSourceMcp()
+    {
+        // Direct repository call with the default (Human) overload — proves
+        // the human path never injects source:mcp or review:pending.
+        var repo = new Fishbowl.Data.Repositories.NoteRepository(_dbFactory,
+            new Fishbowl.Data.Repositories.TagRepository(_dbFactory));
+        var id = await repo.CreateAsync(AliceId,
+            new Fishbowl.Core.Models.Note { Title = "human-wrote-this" },
+            TestContext.Current.CancellationToken);
+
+        var stored = await repo.GetByIdAsync(AliceId, id, TestContext.Current.CancellationToken);
+        Assert.DoesNotContain("source:mcp", stored!.Tags);
+        Assert.DoesNotContain("review:pending", stored.Tags);
+    }
+
     [Fact]
     public async Task Mcp_ListPending_ReturnsOnlyPendingNotes()
     {
-        // Seed via direct repository so we can control the tags.
+        // Seed via direct repository. Use NoteSource.Mcp for the pending
+        // note so ApplySourceTags auto-adds review:pending — the default
+        // (Human) overload would strip it.
         var notes = new Fishbowl.Data.Repositories.NoteRepository(_dbFactory,
             new Fishbowl.Data.Repositories.TagRepository(_dbFactory));
-        await notes.CreateAsync(AliceId, new Fishbowl.Core.Models.Note
-        {
-            Title = "pending-1",
-            Tags = new List<string> { "review:pending" },
-        }, TestContext.Current.CancellationToken);
+        await notes.CreateAsync(
+            new ContextRef(ContextType.User, AliceId), AliceId,
+            new Fishbowl.Core.Models.Note { Title = "pending-1" },
+            Fishbowl.Core.Models.NoteSource.Mcp,
+            TestContext.Current.CancellationToken);
         await notes.CreateAsync(AliceId, new Fishbowl.Core.Models.Note
         {
             Title = "approved-1",

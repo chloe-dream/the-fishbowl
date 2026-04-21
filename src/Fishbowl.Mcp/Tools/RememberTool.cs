@@ -8,9 +8,9 @@ using Fishbowl.Core.Util;
 
 namespace Fishbowl.Mcp.Tools;
 
-// Writes a new note. Task 4.4 adds automatic `source:mcp` + `review:pending`
-// tagging on this path; for v1 the tool just creates the note with whatever
-// the caller provided.
+// Writes a new note. Passes NoteSource.Mcp so the repository auto-tags
+// `source:mcp` + `review:pending` — the human catches it in the review
+// inbox before it counts as approved memory.
 public class RememberTool : IMcpTool
 {
     private readonly INoteRepository _notes;
@@ -53,7 +53,7 @@ public class RememberTool : IMcpTool
             Tags = tags,
         };
 
-        var id = await _notes.CreateAsync(ctx, actor, note, ct);
+        var id = await _notes.CreateAsync(ctx, actor, note, NoteSource.Mcp, ct);
         note.Id = id;
 
         return new { id, note = SecretStripper.StripNote(note) };

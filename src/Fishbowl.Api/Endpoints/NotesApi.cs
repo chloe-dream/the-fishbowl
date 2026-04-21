@@ -29,6 +29,14 @@ public static class NotesApi
         static string? ActorUserId(ClaimsPrincipal user)
             => user.FindFirst(McpContextClaims.UserId)?.Value;
 
+        // Bearer clients are MCP-ish; cookie users are humans. The auth
+        // scheme is the authoritative signal here — matches how the
+        // RequireScope helper gates access.
+        static NoteSource SourceForPrincipal(ClaimsPrincipal user)
+            => user.Identity?.AuthenticationType == McpContextClaims.BearerScheme
+                ? NoteSource.Mcp
+                : NoteSource.Human;
+
         group.MapGet("/", async (
             string[]? tag,
             string? match,
@@ -70,7 +78,7 @@ public static class NotesApi
             var actor = ActorUserId(user);
             if (ctx is null || string.IsNullOrEmpty(actor)) return Results.Unauthorized();
 
-            var id = await repo.CreateAsync(ctx.Value, actor, note, ct);
+            var id = await repo.CreateAsync(ctx.Value, actor, note, SourceForPrincipal(user), ct);
             return Results.Created($"/api/v1/notes/{id}", note);
         })
         .WithName("CreateNote")
@@ -85,7 +93,7 @@ public static class NotesApi
             if (ctx is null) return Results.Unauthorized();
 
             note.Id = id;
-            var updated = await repo.UpdateAsync(ctx.Value, note, ct);
+            var updated = await repo.UpdateAsync(ctx.Value, note, SourceForPrincipal(user), ct);
             return updated ? Results.NoContent() : Results.NotFound();
         })
         .WithName("UpdateNote")

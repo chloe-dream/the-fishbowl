@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Fishbowl.Core;
 using Fishbowl.Core.Mcp;
+using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 using Fishbowl.Core.Util;
 
@@ -52,7 +53,7 @@ public class UpdateMemoryTool : IMcpTool
                 .Where(s => !string.IsNullOrEmpty(s)).ToList();
         }
 
-        var ok = await _notes.UpdateAsync(ctx, existing, ct);
+        var ok = await _notes.UpdateAsync(ctx, existing, NoteSource.Mcp, ct);
         return new { updated = ok, note = SecretStripper.StripNote(existing) };
     }
 }

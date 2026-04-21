@@ -63,8 +63,13 @@ public class NoteRepository : INoteRepository
             sql, new { tags, count = tags.Count }, cancellationToken: ct));
     }
 
-    public async Task<string> CreateAsync(ContextRef ctx, string actorUserId, Note note, CancellationToken ct = default)
+    public Task<string> CreateAsync(ContextRef ctx, string actorUserId, Note note, CancellationToken ct = default)
+        => CreateAsync(ctx, actorUserId, note, NoteSource.Human, ct);
+
+    public async Task<string> CreateAsync(ContextRef ctx, string actorUserId, Note note, NoteSource source, CancellationToken ct = default)
     {
+        ApplySourceTags(note, source);
+
         if (string.IsNullOrEmpty(note.Id))
             note.Id = Ulid.NewUlid().ToString();
 
@@ -110,8 +115,12 @@ public class NoteRepository : INoteRepository
         return note.Id;
     }
 
-    public async Task<bool> UpdateAsync(ContextRef ctx, Note note, CancellationToken ct = default)
+    public Task<bool> UpdateAsync(ContextRef ctx, Note note, CancellationToken ct = default)
+        => UpdateAsync(ctx, note, NoteSource.Human, ct);
+
+    public async Task<bool> UpdateAsync(ContextRef ctx, Note note, NoteSource source, CancellationToken ct = default)
     {
+        ApplySourceTags(note, source);
         note.UpdatedAt = DateTime.UtcNow;
 
         return await _dbFactory.WithContextTransactionAsync<bool>(ctx, async (db, tx, token) =>
@@ -198,4 +207,27 @@ public class NoteRepository : INoteRepository
 
     public Task<bool> DeleteAsync(string userId, string id, CancellationToken ct = default)
         => DeleteAsync(ContextRef.User(userId), id, ct);
+
+    // ────────── Source-tag massage ──────────
+    // Runs inside CreateAsync/UpdateAsync before the tag-repo's EnsureExists.
+    // Mcp writes gain `source:mcp` + `review:pending` so the human notices
+    // them in the review inbox. Human writes strip `review:pending` —
+    // editing a pending note is implicit approval.
+    private static void ApplySourceTags(Note note, NoteSource source)
+    {
+        note.Tags ??= new List<string>();
+        var tags = new HashSet<string>(note.Tags, StringComparer.Ordinal);
+
+        if (source == NoteSource.Mcp)
+        {
+            tags.Add("source:mcp");
+            tags.Add("review:pending");
+        }
+        else
+        {
+            tags.Remove("review:pending");
+        }
+
+        note.Tags = tags.ToList();
+    }
 }
