@@ -1,22 +1,24 @@
+using System.Security.Claims;
 using System.Text.Json;
+using Fishbowl.Core;
+using Fishbowl.Core.Mcp;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Fishbowl.Mcp.Endpoints;
 
-// MCP Streamable HTTP endpoint. One POST /mcp with JSON-RPC 2.0 payloads.
-// Requests with an `id` get a 200 + JSON response envelope; notifications
-// (no `id`) get 202 Accepted with an empty body. No SSE in v1 — every
-// method returns synchronously because Claude Code's current client accepts
-// that. The real tool surface (search_memory, remember, etc.) lands in
-// Task 4.3; for now `initialize` and `tools/list` are the only methods.
+// MCP Streamable HTTP endpoint. Single POST /mcp with JSON-RPC 2.0 payloads;
+// synchronous responses only (no SSE). Methods: initialize, tools/list,
+// tools/call. Notifications (no `id`) get 202 with an empty body per the
+// Streamable HTTP spec.
 public static class McpEndpoint
 {
     public static IEndpointRouteBuilder MapMcpEndpoint(this IEndpointRouteBuilder routes)
     {
-        routes.MapPost("/mcp", HandleAsync)
+        routes.MapPost("/mcp", (Delegate)HandleAsync)
             .WithName("Mcp")
             .WithSummary("MCP Streamable HTTP endpoint (JSON-RPC 2.0).")
             .RequireAuthorization();
@@ -24,9 +26,9 @@ public static class McpEndpoint
         return routes;
     }
 
-    private static async Task<IResult> HandleAsync(HttpContext ctx, ILoggerFactory loggerFactory)
+    private static async Task<IResult> HandleAsync(HttpContext ctx)
     {
-        var logger = loggerFactory.CreateLogger("Mcp");
+        var logger = ctx.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("Mcp");
 
         McpRequest? request;
         try
@@ -45,52 +47,109 @@ public static class McpEndpoint
 
         var isNotification = request.Id is null;
 
-        object? result;
+        object? result = null;
         McpError? error = null;
         try
         {
-            result = await DispatchAsync(request, ctx);
+            (result, error) = await DispatchAsync(request, ctx);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "MCP dispatch failed for {Method}", request.Method);
-            result = null;
             error = new McpError(McpErrorCodes.InternalError, ex.Message);
         }
 
-        // Notifications: spec says the server MUST NOT return a response
-        // body. Streamable HTTP recommends 202 Accepted.
         if (isNotification) return Results.Accepted();
 
-        // Unknown method: error response, not exception.
         if (result is null && error is null)
-        {
             error = new McpError(McpErrorCodes.MethodNotFound, $"Method not found: {request.Method}");
-        }
 
         var response = new McpResponse("2.0", request.Id, error is null ? result : null, error);
         return Results.Json(response, JsonOpts);
     }
 
-    // Returns a result object, or null if the method is unknown (caller
-    // converts that to a MethodNotFound error envelope).
-    private static Task<object?> DispatchAsync(McpRequest request, HttpContext ctx)
+    private static async Task<(object? Result, McpError? Error)> DispatchAsync(
+        McpRequest request, HttpContext ctx)
     {
-        return request.Method switch
+        var registry = ctx.RequestServices.GetRequiredService<ToolRegistry>();
+
+        switch (request.Method)
         {
-            "initialize" => Task.FromResult<object?>(new
-            {
-                protocolVersion = McpProtocol.ProtocolVersion,
-                capabilities = new { tools = new { } },
-                serverInfo = new { name = McpProtocol.ServerName, version = McpProtocol.ServerVersion },
-            }),
+            case "initialize":
+                return (new
+                {
+                    protocolVersion = McpProtocol.ProtocolVersion,
+                    capabilities = new { tools = new { } },
+                    serverInfo = new { name = McpProtocol.ServerName, version = McpProtocol.ServerVersion },
+                }, null);
 
-            // Placeholder — Task 4.3 swaps this for a real tool registry.
-            // Listing is free (no scope check); calling is scope-gated.
-            "tools/list" => Task.FromResult<object?>(new { tools = Array.Empty<object>() }),
+            case "tools/list":
+                return (new
+                {
+                    tools = registry.All.Select(t => new
+                    {
+                        name = t.Name,
+                        description = t.Description,
+                        inputSchema = t.InputSchema,
+                    }).ToArray(),
+                }, null);
 
-            _ => Task.FromResult<object?>(null),
-        };
+            case "tools/call":
+                return await CallToolAsync(registry, request, ctx);
+
+            default:
+                return (null, null);
+        }
+    }
+
+    private static async Task<(object? Result, McpError? Error)> CallToolAsync(
+        ToolRegistry registry, McpRequest request, HttpContext ctx)
+    {
+        if (request.Params is not { } p ||
+            !p.TryGetProperty("name", out var nameEl) ||
+            nameEl.ValueKind != JsonValueKind.String)
+        {
+            return (null, new McpError(McpErrorCodes.InvalidParams, "tools/call requires `name`"));
+        }
+
+        var toolName = nameEl.GetString()!;
+        var tool = registry.Get(toolName);
+        if (tool is null)
+            return (null, new McpError(McpErrorCodes.MethodNotFound, $"Unknown tool: {toolName}"));
+
+        // Cookie/OAuth principals have full access (no scope claims).
+        // Bearer principals must carry the tool's RequiredScope.
+        var user = ctx.User;
+        if (user.Identity?.AuthenticationType == McpContextClaims.BearerScheme &&
+            !user.HasClaim(McpContextClaims.Scope, tool.RequiredScope))
+        {
+            return (null, new McpError(
+                McpErrorCodes.InternalError,
+                $"Scope denied: tool '{toolName}' requires '{tool.RequiredScope}'"));
+        }
+
+        ContextRef ctxRef;
+        try { ctxRef = McpContextClaims.Resolve(user); }
+        catch (InvalidOperationException ex)
+        {
+            return (null, new McpError(McpErrorCodes.InternalError, ex.Message));
+        }
+
+        var actor = user.FindFirst(McpContextClaims.UserId)?.Value ?? "";
+        var arguments = p.TryGetProperty("arguments", out var argsEl)
+            ? argsEl : default;
+
+        var toolResult = await tool.InvokeAsync(ctxRef, actor, arguments, user, ctx.RequestAborted);
+
+        // MCP spec envelope: array of content entries. We render structured
+        // results as a JSON string inside a single text content block —
+        // clients re-parse it. Keeps the wire format unambiguous.
+        var text = JsonSerializer.Serialize(toolResult, JsonOpts);
+        return (new
+        {
+            content = new[] { new { type = "text", text } },
+            isError = false,
+        }, null);
     }
 
     private static IResult ErrorResponse(JsonElement? id, int code, string message)

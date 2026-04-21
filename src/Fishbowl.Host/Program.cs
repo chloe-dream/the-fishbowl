@@ -12,7 +12,10 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using Fishbowl.Host;
 using Fishbowl.Host.Auth;
+using Fishbowl.Core.Mcp;
+using Fishbowl.Mcp;
 using Fishbowl.Mcp.Endpoints;
+using Fishbowl.Mcp.Tools;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -37,6 +40,16 @@ builder.Services.AddScoped<INoteRepository, NoteRepository>();
 builder.Services.AddScoped<ITodoRepository, TodoRepository>();
 builder.Services.AddScoped<ITeamRepository, TeamRepository>();
 builder.Services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
+
+// MCP tools — thin adapters around existing repositories. Scoped because
+// they depend on scoped repositories; the registry re-materialises them
+// per request, which is fine at the request rate MCP clients produce.
+builder.Services.AddScoped<IMcpTool, SearchMemoryTool>();
+builder.Services.AddScoped<IMcpTool, RememberTool>();
+builder.Services.AddScoped<IMcpTool, GetMemoryTool>();
+builder.Services.AddScoped<IMcpTool, UpdateMemoryTool>();
+builder.Services.AddScoped<IMcpTool, ListPendingTool>();
+builder.Services.AddScoped<ToolRegistry>();
 
 // Load plugins from configured path (defaults to fishbowl-mods/plugins)
 var pluginsPath = builder.Configuration["Plugins:Path"] ?? "fishbowl-mods/plugins";

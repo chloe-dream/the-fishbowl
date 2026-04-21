@@ -113,9 +113,8 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
     }
 
     [Fact]
-    public async Task Mcp_ToolsList_ReturnsEmptyArray_ForNow()
+    public async Task Mcp_ToolsList_ReturnsAllFiveTools()
     {
-        // Task 4.3 populates this — the test proves the dispatcher wiring.
         var client = await BearerClientAsync();
         var resp = await client.PostAsync("/mcp",
             JsonRpc(new { jsonrpc = "2.0", id = 2, method = "tools/list" }),
@@ -125,8 +124,14 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
         using var doc = JsonDocument.Parse(
             await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         var tools = doc.RootElement.GetProperty("result").GetProperty("tools");
-        Assert.Equal(JsonValueKind.Array, tools.ValueKind);
-        Assert.Equal(0, tools.GetArrayLength());
+        var names = tools.EnumerateArray().Select(t => t.GetProperty("name").GetString()).ToHashSet();
+
+        Assert.Equal(5, names.Count);
+        Assert.Contains("search_memory", names);
+        Assert.Contains("remember", names);
+        Assert.Contains("get_memory", names);
+        Assert.Contains("update_memory", names);
+        Assert.Contains("list_pending", names);
     }
 
     [Fact]
@@ -176,6 +181,154 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
             await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         var err = doc.RootElement.GetProperty("error");
         Assert.Equal(-32700, err.GetProperty("code").GetInt32());
+    }
+
+    // ────────── tools/call ──────────
+
+    private static async Task<JsonElement> CallToolAsync(HttpClient client, string toolName, object arguments)
+    {
+        var resp = await client.PostAsync("/mcp",
+            JsonRpc(new
+            {
+                jsonrpc = "2.0",
+                id = 1,
+                method = "tools/call",
+                @params = new { name = toolName, arguments },
+            }),
+            TestContext.Current.CancellationToken);
+        resp.EnsureSuccessStatusCode();
+        var doc = JsonDocument.Parse(
+            await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        return doc.RootElement.Clone();
+    }
+
+    [Fact]
+    public async Task Mcp_RememberAndGet_RoundTripsANote()
+    {
+        var client = await BearerClientAsync("read:notes", "write:notes");
+
+        var remember = await CallToolAsync(client, "remember", new
+        {
+            title = "mcp-test-title",
+            content = "some body",
+            tags = new[] { "demo" },
+        });
+        var rememberText = remember.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString();
+        using var rememberDoc = JsonDocument.Parse(rememberText!);
+        var noteId = rememberDoc.RootElement.GetProperty("id").GetString();
+        Assert.False(string.IsNullOrEmpty(noteId));
+
+        var get = await CallToolAsync(client, "get_memory", new { id = noteId });
+        var getText = get.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString();
+        using var getDoc = JsonDocument.Parse(getText!);
+        Assert.True(getDoc.RootElement.GetProperty("found").GetBoolean());
+        Assert.Equal("mcp-test-title",
+            getDoc.RootElement.GetProperty("note").GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public async Task Mcp_SearchMemory_FindsByTitleSubstring()
+    {
+        var client = await BearerClientAsync("read:notes", "write:notes");
+
+        await CallToolAsync(client, "remember", new { title = "distinctive-search-target", content = "" });
+        await CallToolAsync(client, "remember", new { title = "irrelevant", content = "" });
+
+        var search = await CallToolAsync(client, "search_memory", new { query = "distinctive-search" });
+        var text = search.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString();
+        using var doc = JsonDocument.Parse(text!);
+        var notes = doc.RootElement.GetProperty("notes");
+        Assert.Equal(1, notes.GetArrayLength());
+        Assert.Equal("distinctive-search-target",
+            notes[0].GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public async Task Mcp_SearchMemory_SecretsStrippedFromResponse()
+    {
+        var client = await BearerClientAsync("read:notes", "write:notes");
+
+        var secretMarker = "supersecret-token-abc123";
+        await CallToolAsync(client, "remember", new
+        {
+            title = "secret-holder",
+            content = $"Public text.\n::secret\n{secretMarker}\n::end\nMore public.",
+        });
+
+        var search = await CallToolAsync(client, "search_memory", new { query = "secret-holder" });
+        var raw = search.GetRawText();
+        Assert.DoesNotContain(secretMarker, raw);
+        Assert.Contains("[secret content hidden]", raw);
+    }
+
+    [Fact]
+    public async Task Mcp_RememberWithoutWriteScope_ReturnsRpcError()
+    {
+        var client = await BearerClientAsync("read:notes"); // no write:notes
+        var resp = await client.PostAsync("/mcp",
+            JsonRpc(new
+            {
+                jsonrpc = "2.0",
+                id = 1,
+                method = "tools/call",
+                @params = new { name = "remember", arguments = new { title = "blocked" } },
+            }),
+            TestContext.Current.CancellationToken);
+        resp.EnsureSuccessStatusCode();
+
+        using var doc = JsonDocument.Parse(
+            await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var err = doc.RootElement.GetProperty("error");
+        Assert.Equal(-32603, err.GetProperty("code").GetInt32());
+        Assert.Contains("Scope denied", err.GetProperty("message").GetString() ?? "");
+    }
+
+    [Fact]
+    public async Task Mcp_UnknownTool_ReturnsMethodNotFound()
+    {
+        var client = await BearerClientAsync("read:notes");
+        var resp = await client.PostAsync("/mcp",
+            JsonRpc(new
+            {
+                jsonrpc = "2.0",
+                id = 1,
+                method = "tools/call",
+                @params = new { name = "nope", arguments = new { } },
+            }),
+            TestContext.Current.CancellationToken);
+        resp.EnsureSuccessStatusCode();
+
+        using var doc = JsonDocument.Parse(
+            await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(-32601,
+            doc.RootElement.GetProperty("error").GetProperty("code").GetInt32());
+    }
+
+    [Fact]
+    public async Task Mcp_ListPending_ReturnsOnlyPendingNotes()
+    {
+        // Seed via direct repository so we can control the tags.
+        var notes = new Fishbowl.Data.Repositories.NoteRepository(_dbFactory,
+            new Fishbowl.Data.Repositories.TagRepository(_dbFactory));
+        await notes.CreateAsync(AliceId, new Fishbowl.Core.Models.Note
+        {
+            Title = "pending-1",
+            Tags = new List<string> { "review:pending" },
+        }, TestContext.Current.CancellationToken);
+        await notes.CreateAsync(AliceId, new Fishbowl.Core.Models.Note
+        {
+            Title = "approved-1",
+        }, TestContext.Current.CancellationToken);
+
+        var client = await BearerClientAsync("read:notes");
+        var resp = await CallToolAsync(client, "list_pending", new { });
+        var text = resp.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString();
+        using var doc = JsonDocument.Parse(text!);
+        var list = doc.RootElement.GetProperty("notes");
+        var titles = list.EnumerateArray()
+            .Select(n => n.GetProperty("title").GetString()).ToHashSet();
+        Assert.Contains("pending-1", titles);
+        Assert.DoesNotContain("approved-1", titles);
     }
 
     [Fact]
