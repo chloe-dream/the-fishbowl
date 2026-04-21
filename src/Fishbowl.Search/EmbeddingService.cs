@@ -124,11 +124,19 @@ public sealed class EmbeddingInitializer : IHostedService
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        _cts?.Cancel();
+        var cts = _cts;
+        if (cts is null) return;
+        _cts = null;
+
+        // WebApplicationFactory in tests can call StopAsync twice via double
+        // dispose, so null-out above is load-bearing — Cancel() on a disposed
+        // token source throws ObjectDisposedException.
+        try { cts.Cancel(); } catch (ObjectDisposedException) { }
+
         if (_runner is not null)
         {
             try { await _runner.WaitAsync(cancellationToken); } catch { /* best-effort */ }
         }
-        _cts?.Dispose();
+        cts.Dispose();
     }
 }

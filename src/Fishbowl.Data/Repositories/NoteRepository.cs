@@ -3,6 +3,8 @@ using Dapper;
 using Fishbowl.Core;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Search;
+using Fishbowl.Core.Util;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -12,15 +14,23 @@ public class NoteRepository : INoteRepository
 {
     private readonly DatabaseFactory _dbFactory;
     private readonly ITagRepository _tagRepository;
+    private readonly IEmbeddingService? _embeddings;
     private readonly ILogger<NoteRepository> _logger;
 
+    // IEmbeddingService is nullable so tests that don't exercise the embedding
+    // path (and the v1 cookie-auth call sites from before Task 5.3 landed)
+    // can construct NoteRepository without a model on disk. When null, the
+    // vec_notes writes are skipped — same degraded path as when the service
+    // is wired but the model hasn't finished downloading.
     public NoteRepository(
         DatabaseFactory dbFactory,
         ITagRepository tagRepository,
+        IEmbeddingService? embeddings = null,
         ILogger<NoteRepository>? logger = null)
     {
         _dbFactory = dbFactory;
         _tagRepository = tagRepository;
+        _embeddings = embeddings;
         _logger = logger ?? NullLogger<NoteRepository>.Instance;
     }
 
@@ -110,6 +120,8 @@ public class NoteRepository : INoteRepository
                     note.Content,
                     TagsFlat = string.Join(' ', note.Tags)
                 }, transaction: tx, cancellationToken: token));
+
+            await UpsertEmbeddingAsync(db, tx, note, token);
         }, ct);
 
         return note.Id;
@@ -157,6 +169,8 @@ public class NoteRepository : INoteRepository
                         note.Content,
                         TagsFlat = string.Join(' ', note.Tags)
                     }, transaction: tx, cancellationToken: token));
+
+                await UpsertEmbeddingAsync(db, tx, note, token);
             }
             else
             {
@@ -172,6 +186,14 @@ public class NoteRepository : INoteRepository
     {
         return await _dbFactory.WithContextTransactionAsync<bool>(ctx, async (db, tx, token) =>
         {
+            // Delete from the two index tables before the authoritative `notes`
+            // row disappears — same pattern notes_fts already uses. `vec_notes`
+            // has no FK, but a stale row there would surface as a phantom hit
+            // in hybrid search (pointing at a notes.id that no longer exists).
+            await db.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM vec_notes WHERE id = @id",
+                new { id }, transaction: tx, cancellationToken: token));
+
             await db.ExecuteAsync(new CommandDefinition(
                 "DELETE FROM notes_fts WHERE rowid = (SELECT rowid FROM notes WHERE id = @id)",
                 new { id }, transaction: tx, cancellationToken: token));
@@ -207,6 +229,64 @@ public class NoteRepository : INoteRepository
 
     public Task<bool> DeleteAsync(string userId, string id, CancellationToken ct = default)
         => DeleteAsync(ContextRef.User(userId), id, ct);
+
+    // ────────── Embedding write ──────────
+    //
+    // Runs inside the same transaction as the notes + notes_fts writes so the
+    // three tables stay consistent. On failure (model not downloaded yet,
+    // ONNX error, etc.) we log and move on — the row lands in vec_notes on
+    // the next UpdateAsync or the explicit re-index action.
+    //
+    // Text fed to the model is: title + stripped content + tag names joined
+    // with spaces. The strip is critical: secret blocks must not shape the
+    // vector — a semantic search over "api key" could otherwise surface the
+    // redacted note because its secret happened to cluster in embedding
+    // space, violating the same invariant SecretStripper enforces on the
+    // MCP wire.
+    private async Task UpsertEmbeddingAsync(IDbConnection db, IDbTransaction tx, Note note, CancellationToken ct)
+    {
+        if (_embeddings is null) return;
+
+        try
+        {
+            var text = BuildEmbeddingText(note);
+            var vec = await _embeddings.EmbedAsync(text, ct);
+
+            // sqlite-vec vec0 FLOAT[N] stores 4*N bytes little-endian. .NET's
+            // float memory layout is IEEE 754 little-endian on every target
+            // platform we support; Buffer.BlockCopy is the no-alloc way to
+            // get there.
+            var blob = new byte[vec.Length * sizeof(float)];
+            Buffer.BlockCopy(vec, 0, blob, 0, blob.Length);
+
+            // sqlite-vec's vec0 virtual table doesn't honour `INSERT OR REPLACE`
+            // as a true replace — the old row sticks around and the new insert
+            // errors on the PK. Do it explicitly: delete first, then insert.
+            await db.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM vec_notes WHERE id = @id",
+                new { id = note.Id }, transaction: tx, cancellationToken: ct));
+            await db.ExecuteAsync(new CommandDefinition(
+                "INSERT INTO vec_notes(id, embedding) VALUES (@id, @blob)",
+                new { id = note.Id, blob }, transaction: tx, cancellationToken: ct));
+        }
+        catch (EmbeddingUnavailableException)
+        {
+            _logger.LogDebug("Embedding service not ready; note {Id} will be indexed on next re-index", note.Id);
+        }
+        catch (Exception ex)
+        {
+            // Don't fail the write over an indexing glitch. The user's note
+            // has to land; the vector can wait for the next opportunity.
+            _logger.LogWarning(ex, "Embedding failed for note {Id}; skipping vec_notes update", note.Id);
+        }
+    }
+
+    private static string BuildEmbeddingText(Note note)
+    {
+        var stripped = SecretStripper.StripNote(note).Content ?? string.Empty;
+        var tags = note.Tags is null ? string.Empty : string.Join(' ', note.Tags);
+        return $"{note.Title} {stripped} {tags}".Trim();
+    }
 
     // ────────── Source-tag massage ──────────
     // Runs inside CreateAsync/UpdateAsync before the tag-repo's EnsureExists.
