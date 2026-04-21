@@ -13,9 +13,11 @@ using Microsoft.Extensions.Logging;
 using Fishbowl.Host;
 using Fishbowl.Host.Auth;
 using Fishbowl.Core.Mcp;
+using Fishbowl.Core.Search;
 using Fishbowl.Mcp;
 using Fishbowl.Mcp.Endpoints;
 using Fishbowl.Mcp.Tools;
+using Fishbowl.Search;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -40,6 +42,20 @@ builder.Services.AddScoped<INoteRepository, NoteRepository>();
 builder.Services.AddScoped<ITodoRepository, TodoRepository>();
 builder.Services.AddScoped<ITeamRepository, TeamRepository>();
 builder.Services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
+
+// Embedding service — singleton because the ONNX session is heavy and ORT's
+// Run() is thread-safe. ModelDownloader points at `{dataRoot}/models/` which
+// follows the same convention as user/system DBs.
+builder.Services.AddSingleton(sp => new ModelDownloader(
+    dataPath,
+    http: null,
+    logger: sp.GetRequiredService<ILogger<ModelDownloader>>()));
+builder.Services.AddSingleton<IEmbeddingService, EmbeddingService>();
+
+// Background download on first start. Detached so a 90MB pull over slow
+// bandwidth doesn't block app startup — callers degrade gracefully via
+// EmbeddingUnavailableException until the model lands.
+builder.Services.AddHostedService<EmbeddingInitializer>();
 
 // MCP tools — thin adapters around existing repositories. Scoped because
 // they depend on scoped repositories; the registry re-materialises them
