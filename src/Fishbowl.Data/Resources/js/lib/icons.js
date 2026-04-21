@@ -51,6 +51,8 @@
         "chevron-right": '<polyline points="9 18 15 12 9 6"/>',
         "chevron-left":  '<polyline points="15 18 9 12 15 6"/>',
         "chevron-down":  '<polyline points="6 9 12 15 18 9"/>',
+        "user":          '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+        "log-out":       '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
         "chevron-up":    '<polyline points="18 15 12 9 6 15"/>',
         "home":          '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
         "star":          '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',

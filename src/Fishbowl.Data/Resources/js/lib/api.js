@@ -45,7 +45,13 @@
         notes: crud("notes"),
         todos: crud("todos"),
         version: () => request("/version"),
-        providers: () => fetch("/api/auth/providers").then(r => r.json())
+        providers: () => fetch("/api/auth/providers").then(r => r.json()),
+        me: {
+            get: () => request("/me")
+        },
+        auth: {
+            logout: () => request("/auth/logout", { method: "POST" })
+        }
     };
     fb.ApiError = ApiError;
 })();
