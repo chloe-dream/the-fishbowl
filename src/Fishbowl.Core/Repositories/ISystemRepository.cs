@@ -10,7 +10,15 @@ public interface ISystemRepository
 
     // User Profile
     Task<bool> CreateUserAsync(string userId, string? name, string? email, string? avatarUrl, CancellationToken ct = default);
-    Task<dynamic?> GetUserAsync(string userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Insert-or-update the user's profile snapshot. Called on every successful
+    /// login so name/email/avatar stay in sync with what the provider sends.
+    /// Returns true on insert or when at least one field changed.
+    /// </summary>
+    Task<bool> UpsertUserAsync(string userId, string? name, string? email, string? avatarUrl, CancellationToken ct = default);
+
+    Task<User?> GetUserAsync(string userId, CancellationToken ct = default);
 
     // Configuration
     Task<string?> GetConfigAsync(string key, CancellationToken ct = default);

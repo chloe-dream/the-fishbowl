@@ -1,5 +1,6 @@
 using System.Data;
 using Dapper;
+using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -49,11 +50,38 @@ public class SystemRepository : ISystemRepository
         return affected > 0;
     }
 
-    public async Task<dynamic?> GetUserAsync(string userId, CancellationToken ct = default)
+    public async Task<User?> GetUserAsync(string userId, CancellationToken ct = default)
     {
         using var db = _dbFactory.CreateSystemConnection();
-        return await db.QuerySingleOrDefaultAsync<dynamic>(
-            new CommandDefinition("SELECT * FROM users WHERE id = @userId", new { userId }, cancellationToken: ct));
+        return await db.QuerySingleOrDefaultAsync<User>(
+            new CommandDefinition(
+                "SELECT id AS Id, name AS Name, email AS Email, avatar_url AS AvatarUrl, created_at AS CreatedAt FROM users WHERE id = @userId",
+                new { userId }, cancellationToken: ct));
+    }
+
+    public async Task<bool> UpsertUserAsync(string userId, string? name, string? email, string? avatarUrl, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.CreateSystemConnection();
+        var affected = await db.ExecuteAsync(new CommandDefinition(@"
+            INSERT INTO users (id, name, email, avatar_url, created_at)
+            VALUES (@userId, @name, @email, @avatarUrl, @createdAt)
+            ON CONFLICT(id) DO UPDATE SET
+                name       = excluded.name,
+                email      = excluded.email,
+                avatar_url = excluded.avatar_url
+            WHERE
+                IFNULL(users.name, '')       != IFNULL(excluded.name, '') OR
+                IFNULL(users.email, '')      != IFNULL(excluded.email, '') OR
+                IFNULL(users.avatar_url, '') != IFNULL(excluded.avatar_url, '')",
+            new { userId, name, email, avatarUrl, createdAt = DateTime.UtcNow.ToString("o") },
+            cancellationToken: ct));
+
+        if (affected > 0)
+        {
+            _logger.LogInformation("User {UserId} profile upserted", userId);
+        }
+
+        return affected > 0;
     }
 
     public async Task<string?> GetConfigAsync(string key, CancellationToken ct = default)

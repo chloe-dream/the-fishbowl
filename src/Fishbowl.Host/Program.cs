@@ -84,21 +84,27 @@ authBuilder.AddGoogle(options =>
 
         if (string.IsNullOrEmpty(providerId)) return;
 
+        var name   = context.Principal?.FindFirstValue(ClaimTypes.Name);
+        var email  = context.Principal?.FindFirstValue(ClaimTypes.Email);
+        var avatar = context.Principal?.FindFirstValue("urn:google:image");
+
         var internalUserId = await repo.GetUserIdByMappingAsync(provider, providerId);
 
         if (string.IsNullOrEmpty(internalUserId))
         {
-            // CREATE NEW USER (GUID)
             internalUserId = Guid.NewGuid().ToString();
-            var name = context.Principal?.FindFirstValue(ClaimTypes.Name);
-            var email = context.Principal?.FindFirstValue(ClaimTypes.Email);
-            var avatar = context.Principal?.FindFirstValue("urn:google:image");
-
             await repo.CreateUserAsync(internalUserId, name, email, avatar);
             await repo.CreateUserMappingAsync(internalUserId, provider, providerId);
 
             var provisionLogger = context.HttpContext.RequestServices.GetService<ILoggerFactory>()?.CreateLogger("Auth");
             provisionLogger?.LogInformation("Provisioned user {UserId} via {Provider}", internalUserId, provider);
+        }
+        else
+        {
+            // Refresh the profile snapshot — name/avatar may change Google-side
+            // and we want our cached copy to stay current. Upsert is a no-op
+            // when nothing changed.
+            await repo.UpsertUserAsync(internalUserId, name, email, avatar);
         }
 
         // Add internal ID as a claim - this is what our APIs will use
@@ -315,6 +321,7 @@ app.MapGet("/logout", async (HttpContext context) =>
 app.MapVersionApi();
 app.MapNotesApi();
 app.MapTodoApi();
+app.MapAccountApi();
 
 // Root route — gate the hub behind setup + authentication so the first click
 // on a tile doesn't dump an unconfigured user into /setup via a silent 401
