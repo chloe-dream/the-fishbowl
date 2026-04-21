@@ -25,7 +25,8 @@ public static class TagsApi
         .WithName("ListTags")
         .WithSummary("Lists all tags for the authenticated user with usage counts.")
         .Produces<IEnumerable<Tag>>()
-        .Produces(StatusCodes.Status401Unauthorized);
+        .Produces(StatusCodes.Status401Unauthorized)
+        .RequireScope("read:tags");
 
         group.MapPut("/{name}", async (
             string name,
@@ -51,7 +52,8 @@ public static class TagsApi
         .WithSummary("Creates a tag with a color, or updates an existing tag's color.")
         .Produces<Tag>()
         .Produces(StatusCodes.Status400BadRequest)
-        .Produces(StatusCodes.Status401Unauthorized);
+        .Produces(StatusCodes.Status401Unauthorized)
+        .RequireScope("write:tags");
 
         group.MapPost("/{name}/rename", async (
             string name,
@@ -78,7 +80,8 @@ public static class TagsApi
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status404NotFound)
-        .Produces(StatusCodes.Status401Unauthorized);
+        .Produces(StatusCodes.Status401Unauthorized)
+        .RequireScope("write:tags");
 
         group.MapDelete("/{name}", async (
             string name,
@@ -104,7 +107,8 @@ public static class TagsApi
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status404NotFound)
-        .Produces(StatusCodes.Status401Unauthorized);
+        .Produces(StatusCodes.Status401Unauthorized)
+        .RequireScope("write:tags");
 
         return group.RequireAuthorization();
     }

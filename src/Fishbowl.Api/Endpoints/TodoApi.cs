@@ -22,7 +22,8 @@ public static class TodoApi
         .WithName("ListTodos")
         .WithSummary("Lists all todos for the authenticated user.")
         .Produces<IEnumerable<TodoItem>>()
-        .Produces(StatusCodes.Status401Unauthorized);
+        .Produces(StatusCodes.Status401Unauthorized)
+        .RequireScope("read:tasks");
 
         group.MapGet("/{id}", async (string id, ClaimsPrincipal user, ITodoRepository repo, CancellationToken ct) =>
         {
@@ -36,7 +37,8 @@ public static class TodoApi
         .WithSummary("Gets a single todo by id.")
         .Produces<TodoItem>()
         .Produces(StatusCodes.Status404NotFound)
-        .Produces(StatusCodes.Status401Unauthorized);
+        .Produces(StatusCodes.Status401Unauthorized)
+        .RequireScope("read:tasks");
 
         group.MapPost("/", async (TodoItem item, ClaimsPrincipal user, ITodoRepository repo, CancellationToken ct) =>
         {
@@ -49,7 +51,8 @@ public static class TodoApi
         .WithName("CreateTodo")
         .WithSummary("Creates a new todo.")
         .Produces<TodoItem>(StatusCodes.Status201Created)
-        .Produces(StatusCodes.Status401Unauthorized);
+        .Produces(StatusCodes.Status401Unauthorized)
+        .RequireScope("write:tasks");
 
         group.MapPut("/{id}", async (string id, TodoItem item, ClaimsPrincipal user, ITodoRepository repo, CancellationToken ct) =>
         {
@@ -64,7 +67,8 @@ public static class TodoApi
         .WithSummary("Updates an existing todo.")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status404NotFound)
-        .Produces(StatusCodes.Status401Unauthorized);
+        .Produces(StatusCodes.Status401Unauthorized)
+        .RequireScope("write:tasks");
 
         group.MapDelete("/{id}", async (string id, ClaimsPrincipal user, ITodoRepository repo, CancellationToken ct) =>
         {
@@ -78,7 +82,8 @@ public static class TodoApi
         .WithSummary("Deletes a todo.")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status404NotFound)
-        .Produces(StatusCodes.Status401Unauthorized);
+        .Produces(StatusCodes.Status401Unauthorized)
+        .RequireScope("write:tasks");
 
         return group.RequireAuthorization();
     }

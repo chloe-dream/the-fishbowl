@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Fishbowl.Core;
+using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 using Microsoft.AspNetCore.Builder;
@@ -121,7 +122,8 @@ public static class TeamsApi
             var matchMode = match == "all" ? "all" : "any";
             return Results.Ok(await notes.GetAllAsync(ContextRef.Team(team.Id), tags, matchMode, ct));
         })
-        .WithName("ListTeamNotes");
+        .WithName("ListTeamNotes")
+        .RequireScope("read:notes");
 
         group.MapGet("/{slug}/notes/{id}", async (
             string slug, string id,
@@ -134,7 +136,8 @@ public static class TeamsApi
             var note = await notes.GetByIdAsync(ContextRef.Team(team.Id), id, ct);
             return note is not null ? Results.Ok(note) : Results.NotFound();
         })
-        .WithName("GetTeamNote");
+        .WithName("GetTeamNote")
+        .RequireScope("read:notes");
 
         group.MapPost("/{slug}/notes", async (
             string slug, Note note,
@@ -149,7 +152,8 @@ public static class TeamsApi
             var created = await notes.CreateAsync(ContextRef.Team(team.Id), userId, note, ct);
             return Results.Created($"/api/v1/teams/{slug}/notes/{created}", note);
         })
-        .WithName("CreateTeamNote");
+        .WithName("CreateTeamNote")
+        .RequireScope("write:notes");
 
         group.MapPut("/{slug}/notes/{id}", async (
             string slug, string id, Note note,
@@ -164,7 +168,8 @@ public static class TeamsApi
             var updated = await notes.UpdateAsync(ContextRef.Team(team.Id), note, ct);
             return updated ? Results.NoContent() : Results.NotFound();
         })
-        .WithName("UpdateTeamNote");
+        .WithName("UpdateTeamNote")
+        .RequireScope("write:notes");
 
         group.MapDelete("/{slug}/notes/{id}", async (
             string slug, string id,
@@ -178,7 +183,8 @@ public static class TeamsApi
             var ok = await notes.DeleteAsync(ContextRef.Team(team.Id), id, ct);
             return ok ? Results.NoContent() : Results.NotFound();
         })
-        .WithName("DeleteTeamNote");
+        .WithName("DeleteTeamNote")
+        .RequireScope("write:notes");
 
         return group.RequireAuthorization();
     }
@@ -192,13 +198,25 @@ public static class TeamsApi
     private static async Task<TeamResolution> ResolveTeamAsync(
         string slug, ClaimsPrincipal user, ITeamRepository teams, CancellationToken ct)
     {
-        var userId = user.FindFirst("fishbowl_user_id")?.Value;
+        var userId = user.FindFirst(McpContextClaims.UserId)?.Value;
         if (string.IsNullOrEmpty(userId))
             return new TeamResolution(null, null, Results.Unauthorized());
 
         var team = await teams.GetBySlugAsync(slug, ct);
         if (team is null)
             return new TeamResolution(null, null, Results.NotFound());
+
+        // Bearer-context match: if the principal is a token, it must be bound
+        // to THIS team. A personal token on a team URL is rejected even when
+        // the underlying user is a team member — the token's own context is
+        // the authoritative scope, not the human behind it.
+        if (user.Identity?.AuthenticationType == McpContextClaims.BearerScheme)
+        {
+            var ctxType = user.FindFirst(McpContextClaims.ContextType)?.Value;
+            var ctxId = user.FindFirst(McpContextClaims.ContextId)?.Value;
+            if (ctxType != "team" || ctxId != team.Slug)
+                return new TeamResolution(team, null, Results.Forbid());
+        }
 
         var role = await teams.GetMembershipAsync(team.Id, userId, ct);
         if (role is null)

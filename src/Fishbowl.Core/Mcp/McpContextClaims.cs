@@ -13,6 +13,12 @@ public static class McpContextClaims
     public const string ContextId = "fishbowl_context_id";
     public const string Scope = "scope";
 
+    // Name of the authentication scheme used for Bearer tokens. Duplicated
+    // here (vs ApiKeyAuthenticationOptions.DefaultScheme in Fishbowl.Host)
+    // because Fishbowl.Api sits below Host in the dep graph and must not
+    // reference host-level auth types.
+    public const string BearerScheme = "ApiKey";
+
     // Collapses the principal to a single `ContextRef`. Bearer principals with
     // an explicit team context resolve to ContextRef.Team; everything else
     // (cookie users and Bearer keys bound to the personal space) resolves to

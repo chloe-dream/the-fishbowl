@@ -245,6 +245,103 @@ public class ApiKeyAuthTests : IClassFixture<WebApplicationFactory<Program>>, ID
     }
 
     [Fact]
+    public async Task BearerWithReadOnlyScope_CanRead_But403OnWrite()
+    {
+        var issued = await _keys.IssueAsync(AliceId, ContextRef.User(AliceId), "ro",
+            new[] { "read:notes" }, TestContext.Current.CancellationToken);
+
+        var client = ClientWithToken(issued.RawToken);
+
+        var getResp = await client.GetAsync("/api/v1/notes", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, getResp.StatusCode);
+
+        var postResp = await client.PostAsJsonAsync("/api/v1/notes",
+            new { title = "should-be-rejected" },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Forbidden, postResp.StatusCode);
+    }
+
+    [Fact]
+    public async Task BearerTeamScope_GetNotes_ReturnsTeamNotes_NotPersonal()
+    {
+        // Seed Alice's PERSONAL note and a TEAM note. Key is team-scoped, so
+        // /api/v1/notes must resolve to the team context, not personal.
+        await _notes.CreateAsync(ContextRef.User(AliceId), AliceId,
+            new Note { Title = "alice-personal" }, TestContext.Current.CancellationToken);
+
+        var teamRepo = new TeamRepository(_dbFactory);
+        var team = await teamRepo.CreateAsync(AliceId, "Team Context Test",
+            TestContext.Current.CancellationToken);
+        await _notes.CreateAsync(ContextRef.Team(team.Slug), AliceId,
+            new Note { Title = "team-shared" }, TestContext.Current.CancellationToken);
+
+        var issued = await _keys.IssueAsync(AliceId, ContextRef.Team(team.Slug), "team-key",
+            new[] { "read:notes" }, TestContext.Current.CancellationToken);
+
+        var client = ClientWithToken(issued.RawToken);
+        var resp = await client.GetAsync("/api/v1/notes", TestContext.Current.CancellationToken);
+        resp.EnsureSuccessStatusCode();
+        var raw = await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains("team-shared", raw);
+        Assert.DoesNotContain("alice-personal", raw);
+    }
+
+    [Fact]
+    public async Task PersonalBearer_CannotAccessTeamNotesUrl()
+    {
+        var teamRepo = new TeamRepository(_dbFactory);
+        var team = await teamRepo.CreateAsync(AliceId, "Alice Only",
+            TestContext.Current.CancellationToken);
+
+        // Alice owns the team but mints a PERSONAL-scoped key. The
+        // authoritative scope is the token's, not the human behind it —
+        // hitting the team URL must 403 even though the user is the owner.
+        var issued = await _keys.IssueAsync(AliceId, ContextRef.User(AliceId), "personal",
+            new[] { "read:notes" }, TestContext.Current.CancellationToken);
+
+        var client = ClientWithToken(issued.RawToken);
+        var resp = await client.GetAsync($"/api/v1/teams/{team.Slug}/notes",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task TeamBearerForTeamA_CannotAccessTeamBNotes()
+    {
+        var teamRepo = new TeamRepository(_dbFactory);
+        var teamA = await teamRepo.CreateAsync(AliceId, "Team A",
+            TestContext.Current.CancellationToken);
+        var teamB = await teamRepo.CreateAsync(AliceId, "Team B",
+            TestContext.Current.CancellationToken);
+
+        var keyA = await _keys.IssueAsync(AliceId, ContextRef.Team(teamA.Slug), "a-key",
+            new[] { "read:notes" }, TestContext.Current.CancellationToken);
+
+        var client = ClientWithToken(keyA.RawToken);
+
+        var okResp = await client.GetAsync($"/api/v1/teams/{teamA.Slug}/notes",
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, okResp.StatusCode);
+
+        var forbidResp = await client.GetAsync($"/api/v1/teams/{teamB.Slug}/notes",
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Forbidden, forbidResp.StatusCode);
+    }
+
+    [Fact]
+    public async Task BearerWithoutTagsScope_CannotListTags()
+    {
+        var issued = await _keys.IssueAsync(AliceId, ContextRef.User(AliceId), "notes-only",
+            new[] { "read:notes" }, TestContext.Current.CancellationToken);
+
+        var client = ClientWithToken(issued.RawToken);
+        var resp = await client.GetAsync("/api/v1/tags", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
+    [Fact]
     public async Task ValidToken_UpdatesLastUsedAt()
     {
         var issued = await _keys.IssueAsync(BobId, ContextRef.User(BobId), "touched",

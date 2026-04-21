@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using System.Security.Claims;
+using Fishbowl.Core;
+using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 
@@ -13,6 +15,20 @@ public static class NotesApi
     {
         var group = routes.MapGroup("/api/v1/notes");
 
+        // Resolves the request to a ContextRef. Cookie users get ContextRef.User
+        // (their fishbowl_user_id). Bearer users get whatever their key was
+        // issued against — personal → User, team → Team. So a team-scoped
+        // Bearer hitting /api/v1/notes reads TEAM notes, not the user's
+        // personal notes. Acceptance criterion from the MCP memory plan.
+        static ContextRef? TryResolveContext(ClaimsPrincipal user)
+        {
+            try { return McpContextClaims.Resolve(user); }
+            catch (InvalidOperationException) { return null; }
+        }
+
+        static string? ActorUserId(ClaimsPrincipal user)
+            => user.FindFirst(McpContextClaims.UserId)?.Value;
+
         group.MapGet("/", async (
             string[]? tag,
             string? match,
@@ -20,73 +36,79 @@ public static class NotesApi
             INoteRepository repo,
             CancellationToken ct) =>
         {
-            var userId = user.FindFirst("fishbowl_user_id")?.Value;
-            if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+            var ctx = TryResolveContext(user);
+            if (ctx is null) return Results.Unauthorized();
 
             var tags = tag is { Length: > 0 } ? tag : null;
             var matchMode = match == "all" ? "all" : "any";
-            return Results.Ok(await repo.GetAllAsync(userId, tags, matchMode, ct));
+            return Results.Ok(await repo.GetAllAsync(ctx.Value, tags, matchMode, ct));
         })
         .WithName("ListNotes")
-        .WithSummary("Lists notes for the authenticated user. Optional ?tag=foo&tag=bar&match=any|all filter.")
+        .WithSummary("Lists notes for the resolved context. Optional ?tag=foo&tag=bar&match=any|all filter.")
         .Produces<IEnumerable<Note>>()
-        .Produces(StatusCodes.Status401Unauthorized);
+        .Produces(StatusCodes.Status401Unauthorized)
+        .RequireScope("read:notes");
 
         group.MapGet("/{id}", async (string id, ClaimsPrincipal user, INoteRepository repo, CancellationToken ct) =>
         {
-            var userId = user.FindFirst("fishbowl_user_id")?.Value;
-            if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+            var ctx = TryResolveContext(user);
+            if (ctx is null) return Results.Unauthorized();
 
-            var note = await repo.GetByIdAsync(userId, id, ct);
+            var note = await repo.GetByIdAsync(ctx.Value, id, ct);
             return note is not null ? Results.Ok(note) : Results.NotFound();
         })
         .WithName("GetNote")
         .WithSummary("Gets a single note by id.")
         .Produces<Note>()
         .Produces(StatusCodes.Status404NotFound)
-        .Produces(StatusCodes.Status401Unauthorized);
+        .Produces(StatusCodes.Status401Unauthorized)
+        .RequireScope("read:notes");
 
         group.MapPost("/", async (Note note, ClaimsPrincipal user, INoteRepository repo, CancellationToken ct) =>
         {
-            var userId = user.FindFirst("fishbowl_user_id")?.Value;
-            if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+            var ctx = TryResolveContext(user);
+            var actor = ActorUserId(user);
+            if (ctx is null || string.IsNullOrEmpty(actor)) return Results.Unauthorized();
 
-            var id = await repo.CreateAsync(userId, note, ct);
+            var id = await repo.CreateAsync(ctx.Value, actor, note, ct);
             return Results.Created($"/api/v1/notes/{id}", note);
         })
         .WithName("CreateNote")
-        .WithSummary("Creates a new note.")
+        .WithSummary("Creates a new note in the resolved context.")
         .Produces<Note>(StatusCodes.Status201Created)
-        .Produces(StatusCodes.Status401Unauthorized);
+        .Produces(StatusCodes.Status401Unauthorized)
+        .RequireScope("write:notes");
 
         group.MapPut("/{id}", async (string id, Note note, ClaimsPrincipal user, INoteRepository repo, CancellationToken ct) =>
         {
-            var userId = user.FindFirst("fishbowl_user_id")?.Value;
-            if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+            var ctx = TryResolveContext(user);
+            if (ctx is null) return Results.Unauthorized();
 
             note.Id = id;
-            var updated = await repo.UpdateAsync(userId, note, ct);
+            var updated = await repo.UpdateAsync(ctx.Value, note, ct);
             return updated ? Results.NoContent() : Results.NotFound();
         })
         .WithName("UpdateNote")
         .WithSummary("Updates an existing note.")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status404NotFound)
-        .Produces(StatusCodes.Status401Unauthorized);
+        .Produces(StatusCodes.Status401Unauthorized)
+        .RequireScope("write:notes");
 
         group.MapDelete("/{id}", async (string id, ClaimsPrincipal user, INoteRepository repo, CancellationToken ct) =>
         {
-            var userId = user.FindFirst("fishbowl_user_id")?.Value;
-            if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+            var ctx = TryResolveContext(user);
+            if (ctx is null) return Results.Unauthorized();
 
-            var success = await repo.DeleteAsync(userId, id, ct);
+            var success = await repo.DeleteAsync(ctx.Value, id, ct);
             return success ? Results.NoContent() : Results.NotFound();
         })
         .WithName("DeleteNote")
         .WithSummary("Deletes a note.")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status404NotFound)
-        .Produces(StatusCodes.Status401Unauthorized);
+        .Produces(StatusCodes.Status401Unauthorized)
+        .RequireScope("write:notes");
 
         return group.RequireAuthorization();
     }
