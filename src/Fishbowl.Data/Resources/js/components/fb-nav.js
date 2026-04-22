@@ -150,6 +150,8 @@ class FbNav extends HTMLElement {
                 .brand .app-name { color: var(--accent); }
                 .spacer { flex: 1; }
                 .toolbar { display: flex; gap: 0.25rem; align-items: center; }
+                .context { display: flex; align-items: center; margin-right: 0.6rem; }
+                .context:empty { margin-right: 0; }
                 .toolbar-sep {
                     width: 1px;
                     height: 22px;
@@ -381,6 +383,7 @@ class FbNav extends HTMLElement {
                     ${appName ? `<span class="sep">·</span><span class="app-name">${appName}</span>` : ``}
                 </a>
                 <div class="spacer"></div>
+                <div class="context"><slot name="context"></slot></div>
                 <div class="toolbar"><slot name="toolbar"></slot></div>
                 <div class="toolbar-sep" id="user-sep" style="display:none;"></div>
                 <div class="user" id="user-widget" style="display:none;">
