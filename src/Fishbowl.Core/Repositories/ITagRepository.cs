@@ -1,10 +1,21 @@
 using System.Data;
+using Fishbowl.Core;
 using Fishbowl.Core.Models;
 
 namespace Fishbowl.Core.Repositories;
 
 public interface ITagRepository
 {
+    // ContextRef overloads — the canonical shape. Supports both personal
+    // (ContextRef.User) and team (ContextRef.Team) callers.
+    Task<IEnumerable<Tag>> GetAllAsync(ContextRef ctx, CancellationToken ct = default);
+    Task<Tag> UpsertColorAsync(ContextRef ctx, string name, string color, CancellationToken ct = default);
+    Task<bool> RenameAsync(ContextRef ctx, string oldName, string newName, CancellationToken ct = default);
+    Task<bool> DeleteAsync(ContextRef ctx, string name, CancellationToken ct = default);
+
+    // Legacy (personal-context) aliases. Kept so existing cookie-auth call
+    // sites stay minimal-diff. Implementations delegate to the ContextRef
+    // versions with ContextRef.User(userId).
     Task<IEnumerable<Tag>> GetAllAsync(string userId, CancellationToken ct = default);
     Task<Tag> UpsertColorAsync(string userId, string name, string color, CancellationToken ct = default);
     Task<bool> RenameAsync(string userId, string oldName, string newName, CancellationToken ct = default);

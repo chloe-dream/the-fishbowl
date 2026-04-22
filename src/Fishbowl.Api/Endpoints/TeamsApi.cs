@@ -186,6 +186,174 @@ public static class TeamsApi
         .WithName("DeleteTeamNote")
         .RequireScope("write:notes");
 
+        // ────────── Nested: team tags ──────────
+
+        group.MapGet("/{slug}/tags", async (
+            string slug, ClaimsPrincipal user, ITeamRepository teams, ITagRepository tags, CancellationToken ct) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            return Results.Ok(await tags.GetAllAsync(ContextRef.Team(resolved.Team!.Id), ct));
+        })
+        .WithName("ListTeamTags")
+        .RequireScope("read:tags");
+
+        group.MapPut("/{slug}/tags/{name}", async (
+            string slug, string name, TagsApi.UpsertColorRequest body,
+            ClaimsPrincipal user, ITeamRepository teams, ITagRepository tags, CancellationToken ct) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
+
+            try
+            {
+                var tag = await tags.UpsertColorAsync(
+                    ContextRef.Team(resolved.Team!.Id), name, body.Color, ct);
+                return Results.Ok(tag);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        })
+        .WithName("UpsertTeamTagColor")
+        .RequireScope("write:tags");
+
+        group.MapPost("/{slug}/tags/{name}/rename", async (
+            string slug, string name, TagsApi.RenameRequest body,
+            ClaimsPrincipal user, ITeamRepository teams, ITagRepository tags, CancellationToken ct) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
+
+            try
+            {
+                var renamed = await tags.RenameAsync(
+                    ContextRef.Team(resolved.Team!.Id), name, body.NewName, ct);
+                return renamed ? Results.NoContent() : Results.NotFound();
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        })
+        .WithName("RenameTeamTag")
+        .RequireScope("write:tags");
+
+        group.MapDelete("/{slug}/tags/{name}", async (
+            string slug, string name,
+            ClaimsPrincipal user, ITeamRepository teams, ITagRepository tags, CancellationToken ct) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
+
+            try
+            {
+                var deleted = await tags.DeleteAsync(
+                    ContextRef.Team(resolved.Team!.Id), name, ct);
+                return deleted ? Results.NoContent() : Results.NotFound();
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        })
+        .WithName("DeleteTeamTag")
+        .RequireScope("write:tags");
+
+        // ────────── Nested: team todos ──────────
+
+        group.MapGet("/{slug}/todos", async (
+            string slug, bool includeCompleted,
+            ClaimsPrincipal user, ITeamRepository teams, ITodoRepository todos, CancellationToken ct) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            return Results.Ok(await todos.GetAllAsync(
+                ContextRef.Team(resolved.Team!.Id), includeCompleted, ct));
+        })
+        .WithName("ListTeamTodos")
+        .RequireScope("read:tasks");
+
+        group.MapGet("/{slug}/todos/{id}", async (
+            string slug, string id,
+            ClaimsPrincipal user, ITeamRepository teams, ITodoRepository todos, CancellationToken ct) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            var item = await todos.GetByIdAsync(ContextRef.Team(resolved.Team!.Id), id, ct);
+            return item is not null ? Results.Ok(item) : Results.NotFound();
+        })
+        .WithName("GetTeamTodo")
+        .RequireScope("read:tasks");
+
+        group.MapPost("/{slug}/todos", async (
+            string slug, TodoItem item,
+            ClaimsPrincipal user, ITeamRepository teams, ITodoRepository todos, CancellationToken ct) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
+
+            var actorUserId = user.FindFirst(McpContextClaims.UserId)!.Value;
+            var id = await todos.CreateAsync(
+                ContextRef.Team(resolved.Team!.Id), actorUserId, item, ct);
+            return Results.Created($"/api/v1/teams/{slug}/todos/{id}", item);
+        })
+        .WithName("CreateTeamTodo")
+        .RequireScope("write:tasks");
+
+        group.MapPut("/{slug}/todos/{id}", async (
+            string slug, string id, TodoItem item,
+            ClaimsPrincipal user, ITeamRepository teams, ITodoRepository todos, CancellationToken ct) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
+
+            item.Id = id;
+            var ok = await todos.UpdateAsync(ContextRef.Team(resolved.Team!.Id), item, ct);
+            return ok ? Results.NoContent() : Results.NotFound();
+        })
+        .WithName("UpdateTeamTodo")
+        .RequireScope("write:tasks");
+
+        group.MapDelete("/{slug}/todos/{id}", async (
+            string slug, string id,
+            ClaimsPrincipal user, ITeamRepository teams, ITodoRepository todos, CancellationToken ct) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
+
+            var ok = await todos.DeleteAsync(ContextRef.Team(resolved.Team!.Id), id, ct);
+            return ok ? Results.NoContent() : Results.NotFound();
+        })
+        .WithName("DeleteTeamTodo")
+        .RequireScope("write:tasks");
+
+        // ────────── Nested: team re-index (cookie-only, like /api/v1/search/reindex) ──────────
+
+        group.MapPost("/{slug}/search/reindex", async (
+            string slug,
+            ClaimsPrincipal user, ITeamRepository teams, INoteRepository notes, CancellationToken ct) =>
+        {
+            // Mirror of SearchApi.cs: maintenance endpoint is cookie-only.
+            if (user.Identity?.AuthenticationType == McpContextClaims.BearerScheme)
+                return Results.Forbid();
+
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
+
+            var result = await notes.ReEmbedAllAsync(ContextRef.Team(resolved.Team!.Id), ct);
+            return Results.Ok(new { processed = result.Processed, failed = result.Failed });
+        })
+        .WithName("ReindexTeamSearch");
+
         return group.RequireAuthorization();
     }
 

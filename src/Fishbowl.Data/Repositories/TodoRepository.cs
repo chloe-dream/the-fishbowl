@@ -1,5 +1,6 @@
 using System.Data;
 using Dapper;
+using Fishbowl.Core;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 using Microsoft.Extensions.Logging;
@@ -18,16 +19,18 @@ public class TodoRepository : ITodoRepository
         _logger = logger ?? NullLogger<TodoRepository>.Instance;
     }
 
-    public async Task<TodoItem?> GetByIdAsync(string userId, string id, CancellationToken ct = default)
+    // ────────── ContextRef overloads (canonical implementation) ──────────
+
+    public async Task<TodoItem?> GetByIdAsync(ContextRef ctx, string id, CancellationToken ct = default)
     {
-        using var db = _dbFactory.CreateConnection(userId);
+        using var db = _dbFactory.CreateContextConnection(ctx);
         return await db.QuerySingleOrDefaultAsync<TodoItem>(
             new CommandDefinition("SELECT * FROM todos WHERE id = @id", new { id }, cancellationToken: ct));
     }
 
-    public async Task<IEnumerable<TodoItem>> GetAllAsync(string userId, bool includeCompleted = false, CancellationToken ct = default)
+    public async Task<IEnumerable<TodoItem>> GetAllAsync(ContextRef ctx, bool includeCompleted = false, CancellationToken ct = default)
     {
-        using var db = _dbFactory.CreateConnection(userId);
+        using var db = _dbFactory.CreateContextConnection(ctx);
         string sql = "SELECT * FROM todos";
         if (!includeCompleted)
         {
@@ -38,20 +41,20 @@ public class TodoRepository : ITodoRepository
         return await db.QueryAsync<TodoItem>(new CommandDefinition(sql, cancellationToken: ct));
     }
 
-    public async Task<string> CreateAsync(string userId, TodoItem item, CancellationToken ct = default)
+    public async Task<string> CreateAsync(ContextRef ctx, string actorUserId, TodoItem item, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(item.Id))
         {
             item.Id = Ulid.NewUlid().ToString();
         }
 
-        _logger.LogDebug("Creating todo {Id} for user {UserId}", item.Id, userId);
+        _logger.LogDebug("Creating todo {Id} in context {CtxType}:{CtxId}", item.Id, ctx.Type, ctx.Id);
 
         item.CreatedAt = DateTime.UtcNow;
         item.UpdatedAt = item.CreatedAt;
-        item.CreatedBy = userId;
+        item.CreatedBy = actorUserId;
 
-        using var db = _dbFactory.CreateConnection(userId);
+        using var db = _dbFactory.CreateContextConnection(ctx);
         await db.ExecuteAsync(new CommandDefinition(@"
             INSERT INTO todos (id, title, description, due_at, reminder_at, source, created_by, created_at, updated_at, completed_at)
             VALUES (@Id, @Title, @Description, @DueAt, @ReminderAt, @Source, @CreatedBy, @CreatedAt, @UpdatedAt, @CompletedAt)",
@@ -72,11 +75,11 @@ public class TodoRepository : ITodoRepository
         return item.Id;
     }
 
-    public async Task<bool> UpdateAsync(string userId, TodoItem item, CancellationToken ct = default)
+    public async Task<bool> UpdateAsync(ContextRef ctx, TodoItem item, CancellationToken ct = default)
     {
         item.UpdatedAt = DateTime.UtcNow;
 
-        using var db = _dbFactory.CreateConnection(userId);
+        using var db = _dbFactory.CreateContextConnection(ctx);
         var affected = await db.ExecuteAsync(new CommandDefinition(@"
             UPDATE todos
             SET title = @Title,
@@ -101,17 +104,35 @@ public class TodoRepository : ITodoRepository
 
         if (affected == 0)
         {
-            _logger.LogWarning("Update of todo {Id} for user {UserId} matched no rows", item.Id, userId);
+            _logger.LogWarning("Update of todo {Id} in {CtxType}:{CtxId} matched no rows",
+                item.Id, ctx.Type, ctx.Id);
         }
 
         return affected > 0;
     }
 
-    public async Task<bool> DeleteAsync(string userId, string id, CancellationToken ct = default)
+    public async Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default)
     {
-        using var db = _dbFactory.CreateConnection(userId);
-        var affected = await db.ExecuteAsync(new CommandDefinition("DELETE FROM todos WHERE id = @id", new { id }, cancellationToken: ct));
+        using var db = _dbFactory.CreateContextConnection(ctx);
+        var affected = await db.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM todos WHERE id = @id", new { id }, cancellationToken: ct));
         return affected > 0;
     }
 
+    // ────────── Legacy (personal-context) aliases ──────────
+
+    public Task<TodoItem?> GetByIdAsync(string userId, string id, CancellationToken ct = default)
+        => GetByIdAsync(ContextRef.User(userId), id, ct);
+
+    public Task<IEnumerable<TodoItem>> GetAllAsync(string userId, bool includeCompleted = false, CancellationToken ct = default)
+        => GetAllAsync(ContextRef.User(userId), includeCompleted, ct);
+
+    public Task<string> CreateAsync(string userId, TodoItem item, CancellationToken ct = default)
+        => CreateAsync(ContextRef.User(userId), userId, item, ct);
+
+    public Task<bool> UpdateAsync(string userId, TodoItem item, CancellationToken ct = default)
+        => UpdateAsync(ContextRef.User(userId), item, ct);
+
+    public Task<bool> DeleteAsync(string userId, string id, CancellationToken ct = default)
+        => DeleteAsync(ContextRef.User(userId), id, ct);
 }

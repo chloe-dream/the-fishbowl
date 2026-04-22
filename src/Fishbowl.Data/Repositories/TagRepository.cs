@@ -1,5 +1,6 @@
 using System.Data;
 using Dapper;
+using Fishbowl.Core;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
 using Fishbowl.Core.Util;
@@ -19,9 +20,11 @@ public class TagRepository : ITagRepository
         _logger = logger ?? NullLogger<TagRepository>.Instance;
     }
 
-    public async Task<IEnumerable<Tag>> GetAllAsync(string userId, CancellationToken ct = default)
+    // ────────── ContextRef overloads (canonical implementation) ──────────
+
+    public async Task<IEnumerable<Tag>> GetAllAsync(ContextRef ctx, CancellationToken ct = default)
     {
-        using var db = _dbFactory.CreateConnection(userId);
+        using var db = _dbFactory.CreateContextConnection(ctx);
         return await db.QueryAsync<Tag>(new CommandDefinition(@"
             SELECT t.name AS Name,
                    t.color AS Color,
@@ -35,7 +38,7 @@ public class TagRepository : ITagRepository
             ORDER BY t.name", cancellationToken: ct));
     }
 
-    public async Task<Tag> UpsertColorAsync(string userId, string name, string color, CancellationToken ct = default)
+    public async Task<Tag> UpsertColorAsync(ContextRef ctx, string name, string color, CancellationToken ct = default)
     {
         var normalized = TagName.Normalize(name);
         if (!TagPalette.Slots.Contains(color))
@@ -44,7 +47,7 @@ public class TagRepository : ITagRepository
                 $"Color '{color}' is not in the tag palette.", nameof(color));
         }
 
-        using var db = _dbFactory.CreateConnection(userId);
+        using var db = _dbFactory.CreateContextConnection(ctx);
         var now = DateTime.UtcNow.ToString("o");
         await db.ExecuteAsync(new CommandDefinition(@"
             INSERT INTO tags(name, color, created_at) VALUES (@name, @color, @createdAt)
@@ -61,13 +64,13 @@ public class TagRepository : ITagRepository
             new { name = normalized }, cancellationToken: ct));
     }
 
-    public async Task<bool> RenameAsync(string userId, string oldName, string newName, CancellationToken ct = default)
+    public async Task<bool> RenameAsync(ContextRef ctx, string oldName, string newName, CancellationToken ct = default)
     {
         var oldN = TagName.Normalize(oldName);
         var newN = TagName.Normalize(newName);
         if (oldN == newN) return false;
 
-        return await _dbFactory.WithUserTransactionAsync(userId, async (db, tx, token) =>
+        return await _dbFactory.WithContextTransactionAsync(ctx, async (db, tx, token) =>
         {
             // System tags have load-bearing names — workflows match on them.
             // Silently-different names would break review filters / MCP writes.
@@ -106,11 +109,11 @@ public class TagRepository : ITagRepository
         }, ct);
     }
 
-    public async Task<bool> DeleteAsync(string userId, string name, CancellationToken ct = default)
+    public async Task<bool> DeleteAsync(ContextRef ctx, string name, CancellationToken ct = default)
     {
         var normalized = TagName.Normalize(name);
 
-        return await _dbFactory.WithUserTransactionAsync(userId, async (db, tx, token) =>
+        return await _dbFactory.WithContextTransactionAsync(ctx, async (db, tx, token) =>
         {
             var isSystem = await db.ExecuteScalarAsync<long>(new CommandDefinition(
                 "SELECT is_system FROM tags WHERE name = @normalized",
@@ -127,6 +130,20 @@ public class TagRepository : ITagRepository
             return true;
         }, ct);
     }
+
+    // ────────── Legacy (personal-context) aliases ──────────
+
+    public Task<IEnumerable<Tag>> GetAllAsync(string userId, CancellationToken ct = default)
+        => GetAllAsync(ContextRef.User(userId), ct);
+
+    public Task<Tag> UpsertColorAsync(string userId, string name, string color, CancellationToken ct = default)
+        => UpsertColorAsync(ContextRef.User(userId), name, color, ct);
+
+    public Task<bool> RenameAsync(string userId, string oldName, string newName, CancellationToken ct = default)
+        => RenameAsync(ContextRef.User(userId), oldName, newName, ct);
+
+    public Task<bool> DeleteAsync(string userId, string name, CancellationToken ct = default)
+        => DeleteAsync(ContextRef.User(userId), name, ct);
 
     public async Task<IReadOnlyList<string>> EnsureExistsAsync(
         IDbConnection db,
