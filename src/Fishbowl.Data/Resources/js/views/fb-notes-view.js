@@ -551,11 +551,14 @@ class FbNotesView extends HTMLElement {
             this.scheduleAutoSave();
         });
         const tagInput = this.querySelector("#tag-input");
-        tagInput.addEventListener("change", (e) => {
-            const note = this.notes.find(n => n.id === this.selectedId);
-            if (!note) return;
-            note.tags = [...e.detail];
-            this.scheduleAutoSave();
+        tagInput.addEventListener("change", () => {
+            // Don't mutate note.tags here — saveSelected compares the
+            // current input value against the stored note to decide whether
+            // the PUT is needed. Pre-mutating would always produce "no
+            // change" and silently drop every tag edit.
+            if (this.notes.some(n => n.id === this.selectedId)) {
+                this.scheduleAutoSave();
+            }
         });
         // Pin + trash also live in fb-nav's toolbar (see updateToolbar) and on
         // each list row (see renderList's action buttons).
