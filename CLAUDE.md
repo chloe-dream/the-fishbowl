@@ -40,7 +40,7 @@ dotnet test --filter "FullyQualifiedName~TestName"
 **One `DatabaseFactory` (singleton), three DB locations:**
 - `CreateSystemConnection()` → `fishbowl-data/system.db` — `users`, `user_mappings`, `teams`, `team_members`, `api_keys`, `system_config`.
 - `CreateContextConnection(ContextRef.User(userId))` → `fishbowl-data/users/{userId}.db` — notes, events, todos, tags, notes_fts, vec_notes.
-- `CreateContextConnection(ContextRef.Team(slug))` → `fishbowl-data/teams/{slug}.db` — identical schema to user DBs.
+- `CreateContextConnection(ContextRef.Team(slug))` → `fishbowl-data/teams/{teamId}.db` — identical schema to user DBs. The file is keyed by the team's ULID, not its slug — slug can change (rename) while the file stays put. `ResolveTeamAsync` translates slug→id before opening.
 
 Lazy migrations keyed on `PRAGMA user_version`. Dapper raw SQL; IDs are ULIDs (`Ulid.NewUlid().ToString()`).
 

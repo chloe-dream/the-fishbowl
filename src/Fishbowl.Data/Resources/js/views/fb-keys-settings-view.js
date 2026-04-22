@@ -270,6 +270,7 @@ class FbKeysSettingsView extends HTMLElement {
 
             <div class="panel">
                 <h2>New key</h2>
+                <fb-status-banner id="form-status"></fb-status-banner>
                 <div id="form-mount"></div>
             </div>
 
@@ -317,9 +318,19 @@ class FbKeysSettingsView extends HTMLElement {
         `;
 
         this.querySelector("#create-btn").addEventListener("click", () => this._create());
-        this.querySelector("#key-name").addEventListener("keydown", (e) => {
+        const nameEl = this.querySelector("#key-name");
+        nameEl.addEventListener("keydown", (e) => {
             if (e.key === "Enter") this._create();
         });
+        nameEl.addEventListener("input", () => this._clearStatus());
+    }
+
+    _showStatus(message, kind = "error") {
+        this.querySelector("#form-status")?.show(message, kind);
+    }
+
+    _clearStatus() {
+        this.querySelector("#form-status")?.hide();
     }
 
     renderList() {
@@ -371,8 +382,15 @@ class FbKeysSettingsView extends HTMLElement {
 
     async _create() {
         if (this.busy) return;
-        const name = this.querySelector("#key-name").value.trim();
-        if (!name) return;
+        this._clearStatus();
+
+        const nameInput = this.querySelector("#key-name");
+        const name = nameInput.value.trim();
+        if (!name) {
+            this._showStatus("Name is required.");
+            nameInput.focus();
+            return;
+        }
 
         const ctxValue = this.querySelector("#key-context").value; // "user::" or "team::{slug}"
         const [contextType, contextId] = ctxValue.split("::");
@@ -380,7 +398,7 @@ class FbKeysSettingsView extends HTMLElement {
             .map(el => el.value);
 
         if (scopes.length === 0) {
-            alert("Pick at least one scope.");
+            this._showStatus("Pick at least one scope.");
             return;
         }
 
@@ -399,10 +417,10 @@ class FbKeysSettingsView extends HTMLElement {
         } catch (err) {
             console.warn("[fb-keys-settings-view] create failed:", err);
             const status = err?.status;
-            if (status === 400) alert(`Invalid: ${err?.body || "check form"}`);
-            else if (status === 403) alert("You can't mint a key for that context.");
-            else if (status === 404) alert("Unknown team.");
-            else alert("Failed to create key.");
+            if (status === 400)      this._showStatus(`Invalid: ${err?.body || "check form"}`);
+            else if (status === 403) this._showStatus("You can't mint a key for that context.");
+            else if (status === 404) this._showStatus("Unknown team.");
+            else                     this._showStatus("Failed to create key.");
         } finally {
             this.busy = false;
             this._setBusy(false);
@@ -428,7 +446,7 @@ class FbKeysSettingsView extends HTMLElement {
             await this.refresh();
         } catch (err) {
             console.warn("[fb-keys-settings-view] revoke failed:", err);
-            alert("Failed to revoke key.");
+            this._showStatus("Failed to revoke key.");
         }
     }
 
@@ -465,7 +483,9 @@ class FbKeysSettingsView extends HTMLElement {
                     setTimeout(() => { btn.textContent = "Copy"; }, 1500);
                 } catch (err) {
                     console.warn("[fb-keys-settings-view] clipboard failed:", err);
-                    alert("Clipboard blocked — select the text manually.");
+                    const btn = overlay.querySelector("#copy-btn");
+                    btn.textContent = "Clipboard blocked";
+                    setTimeout(() => { btn.textContent = "Copy"; }, 2000);
                 }
             });
             overlay.querySelector("#done-btn").addEventListener("click", close);

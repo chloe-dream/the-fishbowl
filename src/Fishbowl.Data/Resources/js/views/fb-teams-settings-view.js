@@ -3,8 +3,11 @@
  *
  * Minimal management surface for team workspaces — list, create, delete.
  * Each team is a shared data context backed by its own SQLite file under
- * fishbowl-data/teams/{slug}.db. Notes live inside via /api/v1/teams/{slug}/notes;
- * context-switching from the UI comes later (needs the MCP / bearer path first).
+ * fishbowl-data/teams/{teamId}.db (keyed by ULID, not slug — so renames don't
+ * move the file). Notes live inside via /api/v1/teams/{slug}/notes; the API
+ * translates slug→id before opening the DB. Renders the id next to each
+ * team (and the user's own id for the personal workspace) so operators can
+ * match rows to files on disk.
  *
  * Light-DOM so app.css tokens apply.
  */
@@ -12,6 +15,7 @@ class FbTeamsSettingsView extends HTMLElement {
     constructor() {
         super();
         this.teams = [];
+        this.me = null;
         this.busy = false;
     }
 
@@ -22,11 +26,18 @@ class FbTeamsSettingsView extends HTMLElement {
 
     async refresh() {
         try {
-            this.teams = await fb.api.teams.list();
+            const [teams, me] = await Promise.all([
+                fb.api.teams.list(),
+                fb.api.me.get().catch(() => null),
+            ]);
+            this.teams = teams || [];
+            this.me = me;
         } catch (err) {
             console.error("[fb-teams-settings-view] list failed:", err);
             this.teams = [];
+            this.me = null;
         }
+        this.renderPersonal();
         this.renderList();
     }
 
@@ -126,6 +137,16 @@ class FbTeamsSettingsView extends HTMLElement {
                     color: var(--accent);
                     font-weight: 700;
                 }
+                fb-teams-settings-view .id-chip {
+                    font-family: 'SFMono-Regular', Consolas, monospace;
+                    font-size: 11px;
+                    padding: 1px 6px;
+                    border-radius: 4px;
+                    background: rgba(0, 0, 0, 0.3);
+                    color: var(--text);
+                    user-select: all;
+                }
+                fb-teams-settings-view .id-chip[title] { cursor: help; }
                 fb-teams-settings-view .delete-btn {
                     background: transparent;
                     border: none;
@@ -155,9 +176,15 @@ class FbTeamsSettingsView extends HTMLElement {
                 </p>
             </header>
 
-            <div class="create-row">
-                <input type="text" id="name-input" placeholder="New team name (e.g. 'Fishbowl Dev')" maxlength="60"/>
-                <button type="button" id="create-btn">Create team</button>
+            <h2 class="list-title">Personal workspace</h2>
+            <div id="personal-row"></div>
+
+            <div style="margin-top: 32px;">
+                <fb-status-banner id="form-status"></fb-status-banner>
+                <div class="create-row">
+                    <input type="text" id="name-input" placeholder="New team name (e.g. 'Fishbowl Dev')" maxlength="60"/>
+                    <button type="button" id="create-btn">Create team</button>
+                </div>
             </div>
 
             <h2 class="list-title">Your teams</h2>
@@ -171,6 +198,38 @@ class FbTeamsSettingsView extends HTMLElement {
         input.addEventListener("keydown", (e) => {
             if (e.key === "Enter") this._create();
         });
+        input.addEventListener("input", () => this._clearStatus());
+    }
+
+    _showStatus(message, kind = "error") {
+        this.querySelector("#form-status")?.show(message, kind);
+    }
+
+    _clearStatus() {
+        this.querySelector("#form-status")?.hide();
+    }
+
+    renderPersonal() {
+        const mount = this.querySelector("#personal-row");
+        if (!mount) return;
+
+        if (!this.me?.id) {
+            mount.innerHTML = `<div class="empty">loading…</div>`;
+            return;
+        }
+
+        mount.innerHTML = `
+            <div class="team-row">
+                <fb-icon name="user"></fb-icon>
+                <div class="team-info">
+                    <p class="team-name">${escapeHtml(this.me.displayName || this.me.email || "You")}</p>
+                    <div class="team-meta">
+                        <span class="id-chip"
+                              title="users/${escapeAttr(this.me.id)}.db">${escapeHtml(this.me.id)}</span>
+                    </div>
+                </div>
+            </div>
+        `;
     }
 
     renderList() {
@@ -190,6 +249,8 @@ class FbTeamsSettingsView extends HTMLElement {
                     <div class="team-meta">
                         <span>/${escapeHtml(t.slug)}</span>
                         <span class="role">${escapeHtml(t.role)}</span>
+                        <span class="id-chip"
+                              title="teams/${escapeAttr(t.id)}.db">${escapeHtml(t.id)}</span>
                     </div>
                 </div>
                 ${t.role === "owner"
@@ -212,9 +273,15 @@ class FbTeamsSettingsView extends HTMLElement {
 
     async _create() {
         if (this.busy) return;
+        this._clearStatus();
+
         const input = this.querySelector("#name-input");
         const name  = input.value.trim();
-        if (!name) return;
+        if (!name) {
+            this._showStatus("Team name is required.");
+            input.focus();
+            return;
+        }
 
         this.busy = true;
         this._setBusy(true);
@@ -225,8 +292,8 @@ class FbTeamsSettingsView extends HTMLElement {
         } catch (err) {
             console.warn("[fb-teams-settings-view] create failed:", err);
             const status = err?.status;
-            if (status === 400) alert("Invalid team name.");
-            else alert("Failed to create team.");
+            if (status === 400) this._showStatus("Invalid team name.");
+            else                this._showStatus("Failed to create team.");
         } finally {
             this.busy = false;
             this._setBusy(false);
@@ -253,8 +320,8 @@ class FbTeamsSettingsView extends HTMLElement {
         } catch (err) {
             console.warn("[fb-teams-settings-view] delete failed:", err);
             const status = err?.status;
-            if (status === 403) alert("Only the owner can delete this team.");
-            else alert("Failed to delete team.");
+            if (status === 403) this._showStatus("Only the owner can delete this team.");
+            else                this._showStatus("Failed to delete team.");
         }
     }
 
