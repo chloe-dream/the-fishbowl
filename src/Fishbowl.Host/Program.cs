@@ -211,12 +211,15 @@ builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
-// Enforce SSL
+// Enforce SSL in production. In Development we skip both HSTS and the
+// HTTP → HTTPS redirect so local MCP clients (Claude Code, curl) can
+// talk to the server over plain HTTP on a secondary port without
+// tripping on a self-signed dev cert.
 if (!app.Environment.IsDevelopment())
 {
     app.UseHsts();
+    app.UseHttpsRedirection();
 }
-app.UseHttpsRedirection();
 
 // Playwright smoke-test bypass. Seeds fake OAuth config + injects a test user
 // so the browser-driven test can skip setup and auth dances.
@@ -244,6 +247,37 @@ if (app.Environment.IsEnvironment("Testing")
         var principal = new ClaimsPrincipal(identity);
         context.User = principal;
         await next();
+    });
+}
+
+// Dev-only request trace for /mcp + /api so we can see what MCP clients
+// actually send — no body, just method/path/status/auth-scheme. Cheap
+// enough to leave on in Development; off in production.
+if (app.Environment.IsDevelopment())
+{
+    app.Use(async (context, next) =>
+    {
+        var path = context.Request.Path.Value ?? string.Empty;
+        if (path.StartsWith("/mcp", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/api", StringComparison.OrdinalIgnoreCase))
+        {
+            var authHeader = context.Request.Headers.Authorization.FirstOrDefault();
+            var accept = context.Request.Headers.Accept.FirstOrDefault();
+            app.Logger.LogInformation(
+                ">> {Method} {Path} auth={HasAuth} accept={Accept}",
+                context.Request.Method, path,
+                !string.IsNullOrEmpty(authHeader) ? $"{authHeader[..Math.Min(15, authHeader.Length)]}…" : "none",
+                accept);
+            await next(context);
+            app.Logger.LogInformation(
+                "<< {Method} {Path} {Status} scheme={Scheme}",
+                context.Request.Method, path, context.Response.StatusCode,
+                context.User.Identity?.AuthenticationType ?? "anon");
+        }
+        else
+        {
+            await next(context);
+        }
     });
 }
 
