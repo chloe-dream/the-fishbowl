@@ -3,28 +3,49 @@ using Fishbowl.Core;
 using Fishbowl.Data;
 using Fishbowl.Data.Repositories;
 
-// Dev utility: mints a personal-scope API key for local testing and prints
-// the raw token to stdout. Intended to be run once, piped into `.mcp.json`
-// or copy-pasted into Claude Code's MCP config — production keys still get
-// minted through the UI (Settings → API Keys).
+// Dev utility: mints an API key for local testing and prints the raw token
+// to stdout. Intended to be run once, piped into `.mcp.json` or copy-pasted
+// into Claude Code's MCP config — production keys still get minted through
+// the UI (Settings → API Keys).
 //
 // Usage:
-//   dotnet run --project tools/mint-dev-key -- [--data <path>] [--user <id>] [--name <label>]
+//   dotnet run --project tools/mint-dev-key -- \
+//       [--data <path>] \
+//       [--user <id>] \
+//       [--name <label>] \
+//       [--scopes read:notes,write:notes] \
+//       [--context user|team] \
+//       [--context-id <slug>]
 //
 // Defaults:
 //   --data fishbowl-data            (matches Fishbowl.Host's default)
 //   --user <first user in system.db>
 //   --name claude-code-local
+//   --scopes read:notes,write:notes
+//   --context user                  (--context-id required when team)
 
 var args_ = args;
 var dataPath = GetArg("--data") ?? "fishbowl-data";
 var userIdArg = GetArg("--user");
 var name = GetArg("--name") ?? "claude-code-local";
+var scopesArg = GetArg("--scopes") ?? "read:notes,write:notes";
+var contextArg = (GetArg("--context") ?? "user").ToLowerInvariant();
+var contextIdArg = GetArg("--context-id");
 
 if (!Directory.Exists(dataPath) || !File.Exists(Path.Combine(dataPath, "system.db")))
 {
     Console.Error.WriteLine($"error: no system.db found at {Path.GetFullPath(dataPath)}/system.db — start the host at least once first.");
     return 2;
+}
+
+var scopes = scopesArg
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+    .Where(s => !string.IsNullOrWhiteSpace(s))
+    .ToArray();
+if (scopes.Length == 0)
+{
+    Console.Error.WriteLine("error: --scopes must contain at least one non-empty entry (e.g. read:notes)");
+    return 4;
 }
 
 var factory = new DatabaseFactory(dataPath);
@@ -47,15 +68,57 @@ else
     userId = first;
 }
 
+// Resolve the context. Team context validates the slug is a real team and
+// the target user is a member — a key against a team you're not in would
+// still get 403 at query time, but failing here is friendlier.
+ContextRef context;
+string contextDisplay;
+if (contextArg == "user")
+{
+    context = ContextRef.User(userId);
+    contextDisplay = $"user:{userId}";
+}
+else if (contextArg == "team")
+{
+    if (string.IsNullOrEmpty(contextIdArg))
+    {
+        Console.Error.WriteLine("error: --context team requires --context-id <slug>");
+        return 5;
+    }
+
+    using var sys = factory.CreateSystemConnection();
+    var teamRow = sys.QueryFirstOrDefault<(string Id, string Slug)>(
+        "SELECT id AS Id, slug AS Slug FROM teams WHERE slug = @slug OR id = @slug",
+        new { slug = contextIdArg });
+    if (string.IsNullOrEmpty(teamRow.Id))
+    {
+        Console.Error.WriteLine($"error: no team found with slug or id '{contextIdArg}'");
+        return 6;
+    }
+    var isMember = sys.ExecuteScalar<long>(
+        "SELECT COUNT(*) FROM team_members WHERE team_id = @teamId AND user_id = @userId",
+        new { teamId = teamRow.Id, userId }) > 0;
+    if (!isMember)
+    {
+        Console.Error.WriteLine($"error: user {userId} is not a member of team '{teamRow.Slug}'");
+        return 7;
+    }
+
+    context = ContextRef.Team(teamRow.Id);
+    contextDisplay = $"team:{teamRow.Slug}";
+}
+else
+{
+    Console.Error.WriteLine($"error: --context must be 'user' or 'team' (got '{contextArg}')");
+    return 8;
+}
+
 var keys = new ApiKeyRepository(factory);
-var issued = await keys.IssueAsync(
-    userId,
-    ContextRef.User(userId),
-    name,
-    new[] { "read:notes", "write:notes" });
+var issued = await keys.IssueAsync(userId, context, name, scopes);
 
 Console.WriteLine(issued.RawToken);
-Console.Error.WriteLine($"# minted key id={issued.Record.Id} user={userId} scopes=read:notes,write:notes");
+Console.Error.WriteLine(
+    $"# minted key id={issued.Record.Id} user={userId} context={contextDisplay} scopes={string.Join(",", scopes)}");
 return 0;
 
 string? GetArg(string flag)
