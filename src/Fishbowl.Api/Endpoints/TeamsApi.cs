@@ -267,8 +267,9 @@ public static class TeamsApi
         // ────────── Nested: team todos ──────────
 
         group.MapGet("/{slug}/todos", async (
-            string slug, bool includeCompleted,
-            ClaimsPrincipal user, ITeamRepository teams, ITodoRepository todos, CancellationToken ct) =>
+            string slug,
+            ClaimsPrincipal user, ITeamRepository teams, ITodoRepository todos,
+            bool includeCompleted = false, CancellationToken ct = default) =>
         {
             var resolved = await ResolveTeamAsync(slug, user, teams, ct);
             if (resolved.Error is not null) return resolved.Error;
