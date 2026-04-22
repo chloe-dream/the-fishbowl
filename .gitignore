@@ -496,6 +496,10 @@ fishbowl-data/
 fishbowl-mods/
 **/fishbowl-mods/
 
+# Claude Code project-scoped MCP config. Carries a live Bearer token — must
+# never land in git. docs/mcp-manual-test-plan.md explains how to regenerate.
+.mcp.json
+
 # Claude Code per-machine config (settings.local.json lives here)
 .claude/
 
