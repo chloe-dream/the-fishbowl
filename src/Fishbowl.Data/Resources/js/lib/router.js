@@ -11,6 +11,18 @@
         return window.location.hash || "#/";
     }
 
+    // Strips `/team/SLUG` from the current hash so team-context routes share
+    // the same view registrations as personal-context ones. A view in a team
+    // workspace looks identical — only the data (via fb.context + fb.api)
+    // differs. This keeps `fb.router.register("#/notes", ...)` working for
+    // both `#/notes` and `#/team/SLUG/notes`.
+    function resourceHash() {
+        const hash = currentHash();
+        const m = hash.match(/^#\/team\/[^\/]+(\/.*)?$/);
+        if (m) return "#" + (m[1] || "/");
+        return hash;
+    }
+
     function render() {
         if (!rootElement) return;
         // Clear any per-view toolbar items left over from the previous view.
@@ -19,8 +31,8 @@
         // never needs to clean up explicitly.
         if (window.fb?.toolbar) window.fb.toolbar.clear();
 
-        const hash = currentHash();
-        const entry = routes.get(hash) || routes.get("#/");
+        const key = resourceHash();
+        const entry = routes.get(key) || routes.get("#/");
         if (!entry) { rootElement.innerHTML = ""; return; }
         rootElement.innerHTML = `<${entry.tag}></${entry.tag}>`;
     }
@@ -38,13 +50,19 @@
             window.dispatchEvent(new CustomEvent("fb:route-registered", {
                 detail: { hash, tag: tagName }
             }));
-            if (rootElement && currentHash() === hash) render();
+            if (rootElement && resourceHash() === hash) render();
         },
         routes() {
             return Array.from(routes.entries()).map(([hash, info]) => ({ hash, ...info }));
         },
         current() {
             return currentHash();
+        },
+        // Returns the personal-scope hash of the currently-active view,
+        // regardless of team prefix. Useful for "am I on #/notes?" checks
+        // that should succeed in both contexts.
+        currentResource() {
+            return resourceHash();
         },
         navigate(hash) {
             window.location.hash = hash;

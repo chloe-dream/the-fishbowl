@@ -1,6 +1,11 @@
 /**
  * Fishbowl — fetch wrapper for /api/v1/*.
  * 401 responses redirect to /login. Non-OK responses throw ApiError.
+ *
+ * Context-aware: every CRUD wrapper routes through `fb.context.endpoint(path)`
+ * so a request for "/notes" becomes "/api/v1/notes" when personal is active
+ * or "/api/v1/teams/SLUG/notes" when a team is active. Context-agnostic
+ * endpoints (teams CRUD, API keys, auth, /me) stay on the personal path.
  */
 (function () {
     const base = "/api/v1";
@@ -33,23 +38,30 @@
         return res.text();
     }
 
+    // `ctx(path)` prefixes `path` with the current team slug when a team
+    // context is active. Called lazily (per request) so switching context
+    // doesn't require rebuilding the fb.api object.
+    function ctx(path) {
+        return window.fb?.context?.endpoint ? fb.context.endpoint(path) : path;
+    }
+
     const crud = (resource) => ({
-        list:   ()        => request(`/${resource}`),
-        get:    (id)      => request(`/${resource}/${encodeURIComponent(id)}`),
-        create: (body)    => request(`/${resource}`,                      { method: "POST",   body: JSON.stringify(body) }),
-        update: (id, body) => request(`/${resource}/${encodeURIComponent(id)}`, { method: "PUT",    body: JSON.stringify(body) }),
-        delete: (id)      => request(`/${resource}/${encodeURIComponent(id)}`, { method: "DELETE" })
+        list:   ()        => request(ctx(`/${resource}`)),
+        get:    (id)      => request(ctx(`/${resource}/${encodeURIComponent(id)}`)),
+        create: (body)    => request(ctx(`/${resource}`),                      { method: "POST",   body: JSON.stringify(body) }),
+        update: (id, body) => request(ctx(`/${resource}/${encodeURIComponent(id)}`), { method: "PUT",    body: JSON.stringify(body) }),
+        delete: (id)      => request(ctx(`/${resource}/${encodeURIComponent(id)}`), { method: "DELETE" })
     });
 
     // Notes list accepts an optional filter: { tags?: string[], match?: 'any'|'all' }.
     // Repeated `tag` query params follow the server's IReadOnlyCollection<string>
     // binding; absent params leave the server defaults (no filter, match=any).
     function listNotes(opts) {
-        if (!opts || !opts.tags || opts.tags.length === 0) return request("/notes");
+        if (!opts || !opts.tags || opts.tags.length === 0) return request(ctx("/notes"));
         const qs = new URLSearchParams();
         for (const t of opts.tags) qs.append("tag", t);
         if (opts.match === "all") qs.set("match", "all");
-        return request(`/notes?${qs.toString()}`);
+        return request(`${ctx("/notes")}?${qs.toString()}`);
     }
 
     const notes = crud("notes");
@@ -59,13 +71,18 @@
         notes,
         todos: crud("todos"),
         tags: {
-            list:        ()                  => request("/tags"),
-            upsertColor: (name, color)       => request(`/tags/${encodeURIComponent(name)}`,
+            list:        ()                  => request(ctx("/tags")),
+            upsertColor: (name, color)       => request(ctx(`/tags/${encodeURIComponent(name)}`),
                                                         { method: "PUT", body: JSON.stringify({ color }) }),
-            rename:      (name, newName)     => request(`/tags/${encodeURIComponent(name)}/rename`,
+            rename:      (name, newName)     => request(ctx(`/tags/${encodeURIComponent(name)}/rename`),
                                                         { method: "POST", body: JSON.stringify({ newName }) }),
-            delete:      (name)              => request(`/tags/${encodeURIComponent(name)}`,
+            delete:      (name)              => request(ctx(`/tags/${encodeURIComponent(name)}`),
                                                         { method: "DELETE" })
+        },
+        // Search admin — reindex runs against the active context. Cookie-only
+        // server-side (Bearer 403s), consistent with SearchApi / TeamsApi.
+        search: {
+            reindex: () => request(ctx("/search/reindex"), { method: "POST" })
         },
         teams: {
             list:   ()       => request("/teams"),

@@ -10,10 +10,11 @@
     <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
-    <!-- lib (load order matters: globals → icons → router+api, then components, then views) -->
+    <!-- lib (load order matters: globals → icons → router+context+api, then components, then views) -->
     <script defer src="/js/lib/globals.js"></script>
     <script defer src="/js/lib/icons.js"></script>
     <script defer src="/js/lib/router.js"></script>
+    <script defer src="/js/lib/context.js"></script>
     <script defer src="/js/lib/api.js"></script>
     <script defer src="/js/lib/tags-registry.js"></script>
     <script defer src="/js/lib/dialog.js"></script>
@@ -35,6 +36,7 @@
     <script defer src="/js/components/fb-tag-chip.js"></script>
     <script defer src="/js/components/fb-tag-input.js"></script>
     <script defer src="/js/components/fb-tag-manage-dialog.js"></script>
+    <script defer src="/js/components/fb-context-switcher.js"></script>
 
     <!-- views -->
     <script defer src="/js/views/fb-hub-view.js"></script>
@@ -44,7 +46,9 @@
     <script defer src="/js/views/fb-keys-settings-view.js"></script>
 
     <!-- shell -->
-    <fb-nav></fb-nav>
+    <fb-nav>
+        <fb-context-switcher slot="toolbar"></fb-context-switcher>
+    </fb-nav>
     <div id="app-root"></div>
 
     <script defer>

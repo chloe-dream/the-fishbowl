@@ -35,9 +35,10 @@ class FbNav extends HTMLElement {
     }
 
     disconnectedCallback() {
-        if (this._escHandler)     document.removeEventListener("keydown", this._escHandler);
-        if (this._hashHandler)    window.removeEventListener("hashchange", this._hashHandler);
-        if (this._routeHandler)   window.removeEventListener("fb:route-registered", this._routeHandler);
+        if (this._escHandler)      document.removeEventListener("keydown", this._escHandler);
+        if (this._hashHandler)     window.removeEventListener("hashchange", this._hashHandler);
+        if (this._routeHandler)    window.removeEventListener("fb:route-registered", this._routeHandler);
+        if (this._contextHandler)  window.removeEventListener("fb:context-changed", this._contextHandler);
         if (this._docClickHandler) document.removeEventListener("click", this._docClickHandler, true);
         if (window.fb?.toolbar?._nav === this) fb.toolbar._nav = null;
     }
@@ -88,7 +89,13 @@ class FbNav extends HTMLElement {
     render() {
         const appName = this.getAttribute("app-name") || "";
         const routes = (fb.router?.routes() || []).filter(r => r.hash !== "#/");
-        const current = fb.router?.current() || "#/";
+        // currentResource() strips any /team/SLUG prefix so "active" state
+        // highlights the right nav item in both contexts.
+        const currentResource = fb.router?.currentResource?.() || fb.router?.current() || "#/";
+        // Prefix each nav href with /team/SLUG when a team is active, so
+        // clicking "Notes" from a team workspace keeps you in the team.
+        const hrefFor = (personalHash) =>
+            window.fb?.context?.hashFor ? fb.context.hashFor(personalHash) : personalHash;
 
         this.shadowRoot.innerHTML = `
             <style>
@@ -368,7 +375,7 @@ class FbNav extends HTMLElement {
                 <button class="menu-btn" aria-label="Menu">
                     <fb-icon name="menu"></fb-icon>
                 </button>
-                <a class="brand" href="#/">
+                <a class="brand" href="${hrefFor("#/")}">
                     <span class="brand-mark"><fb-icon name="fish"></fb-icon></span>
                     <span>THE FISHBOWL</span>
                     ${appName ? `<span class="sep">·</span><span class="app-name">${appName}</span>` : ``}
@@ -403,7 +410,7 @@ class FbNav extends HTMLElement {
                     : `<ul class="nav-list">
                          ${routes.map(r => `
                              <li>
-                                 <a class="nav-item ${r.hash === current ? "active" : ""}" href="${r.hash}">
+                                 <a class="nav-item ${r.hash === currentResource ? "active" : ""}" href="${hrefFor(r.hash)}">
                                      ${r.icon ? `<fb-icon name="${r.icon}"></fb-icon>` : ""}
                                      <span>${r.label}</span>
                                  </a>
@@ -594,6 +601,11 @@ class FbNav extends HTMLElement {
         // even if view scripts run after the nav's first render.
         this._routeHandler = () => this.render();
         window.addEventListener("fb:route-registered", this._routeHandler);
+
+        // Context switch: hrefs pick up the new team prefix, active-state
+        // moves to the correct item.
+        this._contextHandler = () => this.render();
+        window.addEventListener("fb:context-changed", this._contextHandler);
 
         // Any click outside the user widget closes the dropdown. We handle
         // this in the capture phase because the shadow root's boundary means
