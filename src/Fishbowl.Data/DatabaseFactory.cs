@@ -174,6 +174,14 @@ public class DatabaseFactory
             ApplyUserV4(connection);
             connection.Execute("PRAGMA user_version = 4");
             _logger.LogInformation("Applied user schema v4 to {DbPath}", ((SqliteConnection)connection).DataSource);
+            version = 4;
+        }
+
+        if (version < 5)
+        {
+            ApplyUserV5(connection);
+            connection.Execute("PRAGMA user_version = 5");
+            _logger.LogInformation("Applied user schema v5 to {DbPath}", ((SqliteConnection)connection).DataSource);
         }
     }
 
@@ -377,6 +385,50 @@ public class DatabaseFactory
                 CREATE VIRTUAL TABLE IF NOT EXISTS vec_notes USING vec0(
                     id TEXT PRIMARY KEY,
                     embedding FLOAT[384]
+                );", transaction: transaction);
+
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    // Contacts: CONCEPT.md § Contacts — "Not an address book. A living
+    // record of the people who matter." Stored in the same user/team DB
+    // so the "one file = one context" invariant holds. FTS follows the
+    // notes_fts pattern (plain FTS5, rowid mirrored manually by the repo
+    // — no external-content FTS, so we stay flexible on schema changes).
+    // Secret blocks deliberately don't exist here: there's no encrypted
+    // column on contacts, hence no stripping layer.
+    private void ApplyUserV5(IDbConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            connection.Execute(@"
+                CREATE TABLE IF NOT EXISTS contacts (
+                    id          TEXT PRIMARY KEY,
+                    name        TEXT NOT NULL,
+                    email       TEXT,
+                    phone       TEXT,
+                    notes       TEXT,
+                    archived    INTEGER DEFAULT 0,
+                    created_by  TEXT NOT NULL,
+                    created_at  TEXT NOT NULL,
+                    updated_at  TEXT NOT NULL
+                );", transaction: transaction);
+
+            // Lowercase-name index for stable alphabetical list ordering.
+            connection.Execute(@"
+                CREATE INDEX IF NOT EXISTS idx_contacts_name_lower
+                ON contacts(LOWER(name));", transaction: transaction);
+
+            connection.Execute(@"
+                CREATE VIRTUAL TABLE IF NOT EXISTS contacts_fts USING fts5(
+                    name, email, phone, notes
                 );", transaction: transaction);
 
             transaction.Commit();

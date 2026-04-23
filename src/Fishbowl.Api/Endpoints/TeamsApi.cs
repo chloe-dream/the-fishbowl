@@ -337,6 +337,86 @@ public static class TeamsApi
         .WithName("DeleteTeamTodo")
         .RequireScope("write:tasks");
 
+        // ────────── Nested: team contacts ──────────
+
+        group.MapGet("/{slug}/contacts", async (
+            string slug,
+            ClaimsPrincipal user, ITeamRepository teams, IContactRepository contacts,
+            bool includeArchived = false, CancellationToken ct = default) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            return Results.Ok(await contacts.GetAllAsync(
+                ContextRef.Team(resolved.Team!.Id), includeArchived, ct));
+        })
+        .WithName("ListTeamContacts")
+        .RequireScope("read:contacts");
+
+        group.MapGet("/{slug}/contacts/{id}", async (
+            string slug, string id,
+            ClaimsPrincipal user, ITeamRepository teams, IContactRepository contacts,
+            CancellationToken ct) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            var item = await contacts.GetByIdAsync(ContextRef.Team(resolved.Team!.Id), id, ct);
+            return item is not null ? Results.Ok(item) : Results.NotFound();
+        })
+        .WithName("GetTeamContact")
+        .RequireScope("read:contacts");
+
+        group.MapPost("/{slug}/contacts", async (
+            string slug, Contact contact,
+            ClaimsPrincipal user, ITeamRepository teams, IContactRepository contacts,
+            CancellationToken ct) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
+            if (string.IsNullOrWhiteSpace(contact.Name))
+                return Results.BadRequest(new { error = "name is required" });
+
+            var actorId = user.FindFirst(McpContextClaims.UserId)!.Value;
+            var id = await contacts.CreateAsync(
+                ContextRef.Team(resolved.Team!.Id), actorId, contact, ct);
+            return Results.Created($"/api/v1/teams/{slug}/contacts/{id}", contact);
+        })
+        .WithName("CreateTeamContact")
+        .RequireScope("write:contacts");
+
+        group.MapPut("/{slug}/contacts/{id}", async (
+            string slug, string id, Contact contact,
+            ClaimsPrincipal user, ITeamRepository teams, IContactRepository contacts,
+            CancellationToken ct) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
+            if (string.IsNullOrWhiteSpace(contact.Name))
+                return Results.BadRequest(new { error = "name is required" });
+
+            contact.Id = id;
+            var ok = await contacts.UpdateAsync(ContextRef.Team(resolved.Team!.Id), contact, ct);
+            return ok ? Results.NoContent() : Results.NotFound();
+        })
+        .WithName("UpdateTeamContact")
+        .RequireScope("write:contacts");
+
+        group.MapDelete("/{slug}/contacts/{id}", async (
+            string slug, string id,
+            ClaimsPrincipal user, ITeamRepository teams, IContactRepository contacts,
+            CancellationToken ct) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
+
+            var ok = await contacts.DeleteAsync(ContextRef.Team(resolved.Team!.Id), id, ct);
+            return ok ? Results.NoContent() : Results.NotFound();
+        })
+        .WithName("DeleteTeamContact")
+        .RequireScope("write:contacts");
+
         // ────────── Nested: team re-index (cookie-only, like /api/v1/search/reindex) ──────────
 
         group.MapPost("/{slug}/search/reindex", async (

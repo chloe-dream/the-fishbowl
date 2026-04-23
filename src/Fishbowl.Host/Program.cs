@@ -70,6 +70,7 @@ builder.Services.AddScoped<ISystemRepository, SystemRepository>();
 builder.Services.AddScoped<ITagRepository, TagRepository>();
 builder.Services.AddScoped<INoteRepository, NoteRepository>();
 builder.Services.AddScoped<ITodoRepository, TodoRepository>();
+builder.Services.AddScoped<IContactRepository, ContactRepository>();
 builder.Services.AddScoped<ITeamRepository, TeamRepository>();
 builder.Services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
 
@@ -476,6 +477,7 @@ app.MapVersionApi();
 app.MapNotesApi();
 app.MapTagsApi();
 app.MapTodoApi();
+app.MapContactsApi();
 app.MapTeamsApi();
 app.MapApiKeysApi();
 app.MapAccountApi();

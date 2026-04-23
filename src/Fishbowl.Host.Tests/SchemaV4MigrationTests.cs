@@ -19,13 +19,16 @@ public class SchemaV4MigrationTests : IDisposable
     }
 
     [Fact]
-    public async Task ApplyV4_OnFreshDb_CreatesVecNotesAndSetsVersion4()
+    public async Task ApplyV4_OnFreshDb_CreatesVecNotesAndVersionAtLeast4()
     {
         var factory = new DatabaseFactory(_dataDir);
         using var db = factory.CreateConnection("fresh-user");
 
+        // A fresh open runs every migration up to the latest — assert only
+        // that v4 has run, not the exact final version (future v5+ tests
+        // would otherwise bump this number).
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(4, version);
+        Assert.True(version >= 4, $"expected version >= 4 after v4 migration, got {version}");
 
         var vecTable = await db.ExecuteScalarAsync<string?>(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'vec_notes'");
@@ -83,7 +86,7 @@ public class SchemaV4MigrationTests : IDisposable
         using var db = factory.CreateConnection(userId);
 
         var version = await db.ExecuteScalarAsync<long>("PRAGMA user_version");
-        Assert.Equal(4, version);
+        Assert.True(version >= 4, $"expected version >= 4 after v4 migration, got {version}");
 
         var userTag = await db.ExecuteScalarAsync<string?>(
             "SELECT name FROM tags WHERE name = 'work'");
