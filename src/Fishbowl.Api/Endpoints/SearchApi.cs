@@ -5,6 +5,7 @@ using System.Security.Claims;
 using Fishbowl.Core;
 using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Core.Search;
 
 namespace Fishbowl.Api.Endpoints;
 
@@ -16,6 +17,49 @@ public static class SearchApi
     public static RouteGroupBuilder MapSearchApi(this IEndpointRouteBuilder routes)
     {
         var group = routes.MapGroup("/api/v1/search");
+
+        // CONCEPT.md § Search — "One search bar for everything. Powered by
+        // a local AI model that understands meaning, not just matching
+        // words." Today hits notes only via HybridSearchService; contacts
+        // live on /api/v1/contacts/search for now until a unified ranker
+        // exists. Response shape mirrors the MCP `search_memory` tool
+        // (notes[] + degraded flag) so clients can swap transports with
+        // minimal code change.
+        group.MapGet("/", async (
+            ClaimsPrincipal user,
+            ISearchService search,
+            string q, int limit = 20, bool includePending = true,
+            CancellationToken ct = default) =>
+        {
+            ContextRef ctx;
+            try { ctx = McpContextClaims.Resolve(user); }
+            catch (InvalidOperationException) { return Results.Unauthorized(); }
+
+            // Clamp limit defensively so a mistaken `?limit=99999999` can't
+            // tip over the candidate pool inside the ranker.
+            limit = Math.Clamp(limit, 1, 100);
+
+            var result = await search.HybridSearchAsync(ctx, q ?? "", limit, includePending, ct);
+            return Results.Ok(new
+            {
+                notes = result.Hits.Select(h => new
+                {
+                    id = h.Note.Id,
+                    title = h.Note.Title,
+                    content = h.Note.Content,
+                    tags = h.Note.Tags,
+                    createdAt = h.Note.CreatedAt,
+                    updatedAt = h.Note.UpdatedAt,
+                    pinned = h.Note.Pinned,
+                    archived = h.Note.Archived,
+                    score = h.Score,
+                }).ToList(),
+                degraded = result.Degraded,
+            });
+        })
+        .WithName("SearchNotes")
+        .WithSummary("Hybrid (semantic + FTS) search across notes in the resolved context.")
+        .RequireScope("read:notes");
 
         // Bulk re-embed every note in the resolved context. Cookie-only —
         // Bearer callers shouldn't be able to trigger long-running

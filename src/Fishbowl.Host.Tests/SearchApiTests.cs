@@ -129,6 +129,74 @@ public class SearchApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
             $"Expected 401 or 403 for unauthenticated call, got {(int)resp.StatusCode}");
     }
 
+    // ────────── GET /api/v1/search (hybrid notes search) ──────────
+
+    [Fact]
+    public async Task Search_Cookie_ReturnsHitsAndDegradedFlag()
+    {
+        var notes = new NoteRepository(_dbFactory, new TagRepository(_dbFactory));
+        await notes.CreateAsync(UserId,
+            new Note { Title = "venue sound check notes", Content = "load-in at 3pm" },
+            TestContext.Current.CancellationToken);
+        await notes.CreateAsync(UserId,
+            new Note { Title = "grocery list", Content = "eggs" },
+            TestContext.Current.CancellationToken);
+
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Id", UserId);
+
+        var resp = await client.GetAsync("/api/v1/search/?q=venue",
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        var body = await resp.Content.ReadFromJsonAsync<SearchResponse>(
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(body);
+        Assert.NotNull(body!.Notes);
+
+        var titles = body.Notes!.Select(n => n.Title).ToHashSet();
+        Assert.Contains("venue sound check notes", titles);
+        Assert.DoesNotContain("grocery list", titles);
+
+        // Degraded is a bool — always present in the envelope, even true
+        // when the embedding model isn't downloaded (FTS-only fallback).
+        Assert.IsType<bool>(body.Degraded);
+    }
+
+    [Fact]
+    public async Task Search_EmptyQuery_ReturnsEmptyHits()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Id", UserId);
+
+        var resp = await client.GetAsync("/api/v1/search/?q=",
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var body = await resp.Content.ReadFromJsonAsync<SearchResponse>(
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(body);
+        Assert.Empty(body!.Notes ?? new());
+    }
+
+    [Fact]
+    public async Task Search_BearerWithoutReadNotesScope_Returns403()
+    {
+        var issued = await _keys.IssueAsync(UserId, ContextRef.User(UserId), "search-ro",
+            new[] { "read:contacts" }, TestContext.Current.CancellationToken);
+
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", issued.RawToken);
+
+        var resp = await client.GetAsync("/api/v1/search/?q=x",
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
+    private record SearchHit(string Id, string Title, string? Content, List<string> Tags,
+        DateTime CreatedAt, DateTime UpdatedAt, bool Pinned, bool Archived, double Score);
+    private record SearchResponse(List<SearchHit>? Notes, bool Degraded);
+
     public void Dispose()
     {
         _factory.Dispose();

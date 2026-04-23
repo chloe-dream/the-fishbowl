@@ -54,4 +54,14 @@ public class OpenApiTests : IClassFixture<WebApplicationFactory<Program>>
         Assert.Contains("/api/v1/export/db", body);
         Assert.Contains("\"ExportUserDatabase\"", body);
     }
+
+    [Fact]
+    public async Task OpenApi_IncludesNotesSearchEndpoint_Test()
+    {
+        var client = _factory.CreateClient();
+        var body = await client.GetStringAsync("/api/openapi.json",
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains("\"SearchNotes\"", body);
+    }
 }

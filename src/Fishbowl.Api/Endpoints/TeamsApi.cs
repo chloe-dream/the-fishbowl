@@ -433,6 +433,40 @@ public static class TeamsApi
 
         // ────────── Nested: team re-index (cookie-only, like /api/v1/search/reindex) ──────────
 
+        // Hybrid notes search, team-scoped. Mirrors /api/v1/search with the
+        // resolved team context — same response shape, same scope.
+        group.MapGet("/{slug}/search", async (
+            string slug, string q,
+            ClaimsPrincipal user, ITeamRepository teams,
+            Fishbowl.Core.Search.ISearchService search,
+            int limit = 20, bool includePending = true, CancellationToken ct = default) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+
+            limit = Math.Clamp(limit, 1, 100);
+            var result = await search.HybridSearchAsync(
+                ContextRef.Team(resolved.Team!.Id), q ?? "", limit, includePending, ct);
+            return Results.Ok(new
+            {
+                notes = result.Hits.Select(h => new
+                {
+                    id = h.Note.Id,
+                    title = h.Note.Title,
+                    content = h.Note.Content,
+                    tags = h.Note.Tags,
+                    createdAt = h.Note.CreatedAt,
+                    updatedAt = h.Note.UpdatedAt,
+                    pinned = h.Note.Pinned,
+                    archived = h.Note.Archived,
+                    score = h.Score,
+                }).ToList(),
+                degraded = result.Degraded,
+            });
+        })
+        .WithName("SearchTeamNotes")
+        .RequireScope("read:notes");
+
         group.MapPost("/{slug}/search/reindex", async (
             string slug,
             ClaimsPrincipal user, ITeamRepository teams, INoteRepository notes, CancellationToken ct) =>
