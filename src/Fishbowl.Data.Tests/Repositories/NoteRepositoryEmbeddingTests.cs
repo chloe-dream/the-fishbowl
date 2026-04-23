@@ -65,8 +65,9 @@ public class NoteRepositoryEmbeddingTests : IDisposable
         byte[] before;
         using (var db = _factory.CreateContextConnection(_ctx))
         {
-            before = await db.ExecuteScalarAsync<byte[]>(
-                "SELECT embedding FROM vec_notes WHERE id = @id", new { id });
+            before = await db.ExecuteScalarAsync<byte[]?>(
+                "SELECT embedding FROM vec_notes WHERE id = @id", new { id })
+                ?? throw new InvalidOperationException("embedding blob missing before update");
         }
 
         // Pull the note back out and update with new content. Fake hashes
@@ -82,8 +83,9 @@ public class NoteRepositoryEmbeddingTests : IDisposable
         byte[] after;
         using (var db = _factory.CreateContextConnection(_ctx))
         {
-            after = await db.ExecuteScalarAsync<byte[]>(
-                "SELECT embedding FROM vec_notes WHERE id = @id", new { id });
+            after = await db.ExecuteScalarAsync<byte[]?>(
+                "SELECT embedding FROM vec_notes WHERE id = @id", new { id })
+                ?? throw new InvalidOperationException("embedding blob missing after update");
         }
 
         Assert.False(before.AsSpan().SequenceEqual(after.AsSpan()),

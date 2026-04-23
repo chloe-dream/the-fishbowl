@@ -96,7 +96,7 @@ public class ContextRefTests : IDisposable
                     u = DateTime.UtcNow.ToString("o")
                 },
                 transaction: tx, cancellationToken: ct));
-        });
+        }, TestContext.Current.CancellationToken);
 
         using var verify = _factory.CreateContextConnection(ctx);
         var count = await verify.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM events");
@@ -117,7 +117,7 @@ public class ContextRefTests : IDisposable
                     new { s = DateTime.UtcNow.ToString("o") },
                     transaction: tx, cancellationToken: ct));
                 throw new InvalidOperationException("abort");
-            });
+            }, TestContext.Current.CancellationToken);
         });
 
         using var verify = _factory.CreateContextConnection(ctx);
