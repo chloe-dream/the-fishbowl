@@ -67,9 +67,24 @@
     const notes = crud("notes");
     notes.list = listNotes;
 
+    // Contacts list accepts an optional filter: { includeArchived?: boolean }.
+    function listContacts(opts) {
+        if (!opts || !opts.includeArchived) return request(ctx("/contacts"));
+        return request(`${ctx("/contacts")}?includeArchived=true`);
+    }
+    const contacts = crud("contacts");
+    contacts.list   = listContacts;
+    // Resource-scoped search — contacts_fts backed, different ranker from
+    // the hybrid notes search so it stays on its own path.
+    contacts.search = (query, { limit = 50 } = {}) => {
+        const qs = new URLSearchParams({ q: query, limit: String(limit) });
+        return request(`${ctx("/contacts/search")}?${qs.toString()}`);
+    };
+
     fb.api = {
         notes,
         todos: crud("todos"),
+        contacts,
         tags: {
             list:        ()                  => request(ctx("/tags")),
             upsertColor: (name, color)       => request(ctx(`/tags/${encodeURIComponent(name)}`),
@@ -79,11 +94,28 @@
             delete:      (name)              => request(ctx(`/tags/${encodeURIComponent(name)}`),
                                                         { method: "DELETE" })
         },
-        // Search admin — reindex runs against the active context. Cookie-only
-        // server-side (Bearer 403s), consistent with SearchApi / TeamsApi.
+        // Hybrid notes search (CONCEPT.md "one search bar for everything").
+        // `query` returns { notes: [{…, score}], degraded: boolean }. Reindex
+        // is cookie-only server-side (Bearer 403s).
         search: {
+            query:   (q, { limit = 20, includePending = true } = {}) => {
+                const qs = new URLSearchParams({
+                    q, limit: String(limit), includePending: String(includePending),
+                });
+                return request(`${ctx("/search")}/?${qs.toString()}`);
+            },
             reindex: () => request(ctx("/search/reindex"), { method: "POST" })
         },
+        // Export the current context's SQLite DB file. Returns a Blob the
+        // caller can turn into a download (e.g. via URL.createObjectURL).
+        // Cookie-only — Bearer gets 403.
+        exportDb: () => fetch(base + ctx("/export/db"), {
+            headers: { "Accept": "application/vnd.sqlite3" },
+        }).then(async (res) => {
+            if (res.status === 401) { window.location.href = "/login"; throw new ApiError(401, "Unauthenticated"); }
+            if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => ""));
+            return res.blob();
+        }),
         teams: {
             list:   ()       => request("/teams"),
             get:    (slug)   => request(`/teams/${encodeURIComponent(slug)}`),
