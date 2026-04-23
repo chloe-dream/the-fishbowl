@@ -107,14 +107,20 @@ using (var probe = factory.CreateContextConnection(ctx))
     var existingTodos = probe.ExecuteScalar<long>(
         "SELECT COUNT(*) FROM todos WHERE title LIKE @pfx || '%'",
         new { pfx = NamePrefix });
+    var existingEvents = probe.ExecuteScalar<long>(
+        "SELECT COUNT(*) FROM events WHERE title LIKE @pfx || '%'",
+        new { pfx = NamePrefix });
 
-    if (!force && (existingNotes + existingContacts + existingTodos) > 0)
+    if (!force && (existingNotes + existingContacts + existingTodos + existingEvents) > 0)
     {
         Console.Error.WriteLine(
             $"# already seeded in {contextDisplay}: " +
-            $"{existingNotes} notes, {existingContacts} contacts, {existingTodos} todos. " +
+            $"{existingNotes} notes, {existingContacts} contacts, " +
+            $"{existingTodos} todos, {existingEvents} events. " +
             "Pass --force to add another batch.");
-        Console.WriteLine($"{{\"notes\":{existingNotes},\"contacts\":{existingContacts},\"todos\":{existingTodos},\"reseeded\":false}}");
+        Console.WriteLine(
+            $"{{\"notes\":{existingNotes},\"contacts\":{existingContacts}," +
+            $"\"todos\":{existingTodos},\"events\":{existingEvents},\"reseeded\":false}}");
         return 0;
     }
 }
@@ -123,6 +129,7 @@ var tagRepo     = new TagRepository(factory);
 var noteRepo    = new NoteRepository(factory, tagRepo);
 var todoRepo    = new TodoRepository(factory);
 var contactRepo = new ContactRepository(factory);
+var eventRepo   = new EventRepository(factory);
 
 // ────────── Notes ──────────
 var notes = new[]
@@ -212,9 +219,44 @@ var contacts = new[]
 var contactCount = 0;
 foreach (var c in contacts) { await contactRepo.CreateAsync(ctx, userId, c); contactCount++; }
 
+// ────────── Events ──────────
+var weekStart = DateTime.UtcNow.Date.AddDays(-(int)DateTime.UtcNow.DayOfWeek);
+var events = new[]
+{
+    new Event
+    {
+        Title    = NamePrefix + "Team sync",
+        StartAt  = weekStart.AddDays(1).AddHours(10),
+        EndAt    = weekStart.AddDays(1).AddHours(10).AddMinutes(30),
+        RRule    = "FREQ=WEEKLY;BYDAY=MO",
+        Location = "Meet link",
+        ReminderMinutes = 10,
+    },
+    new Event
+    {
+        Title   = NamePrefix + "Venue walkthrough",
+        StartAt = weekStart.AddDays(3).AddHours(16),
+        EndAt   = weekStart.AddDays(3).AddHours(17),
+        Location = "Alpine lodge",
+    },
+    new Event
+    {
+        Title       = NamePrefix + "Offsite",
+        StartAt     = weekStart.AddDays(10).AddHours(9),
+        EndAt       = weekStart.AddDays(11).AddHours(17),
+        AllDay      = true,
+        Description = "Two-day offsite — agenda in the shared doc.",
+    },
+};
+var eventCount = 0;
+foreach (var e in events) { await eventRepo.CreateAsync(ctx, userId, e); eventCount++; }
+
 Console.Error.WriteLine(
-    $"# seeded in {contextDisplay}: {noteCount} notes, {contactCount} contacts, {todoCount} todos");
-Console.WriteLine($"{{\"notes\":{noteCount},\"contacts\":{contactCount},\"todos\":{todoCount},\"reseeded\":true}}");
+    $"# seeded in {contextDisplay}: {noteCount} notes, {contactCount} contacts, " +
+    $"{todoCount} todos, {eventCount} events");
+Console.WriteLine(
+    $"{{\"notes\":{noteCount},\"contacts\":{contactCount}," +
+    $"\"todos\":{todoCount},\"events\":{eventCount},\"reseeded\":true}}");
 return 0;
 
 string? GetArg(string flag)

@@ -25,11 +25,12 @@ dotnet run --project tools/seed-dev-data -- --force
 
 ## What gets seeded
 
-| Kind       | Count | Markers                                                   |
-|------------|-------|-----------------------------------------------------------|
-| Notes      | 5     | `seed:dev` tag + `[seed-dev] ` title prefix               |
-| Todos      | 4     | `[seed-dev] ` title prefix, one completed                 |
-| Contacts   | 4     | `[seed-dev] ` name prefix, one archived                   |
+| Kind       | Count | Markers                                                       |
+|------------|-------|---------------------------------------------------------------|
+| Notes      | 5     | `seed:dev` tag + `[seed-dev] ` title prefix                   |
+| Todos      | 4     | `[seed-dev] ` title prefix, one completed                     |
+| Contacts   | 4     | `[seed-dev] ` name prefix, one archived                       |
+| Events     | 3     | `[seed-dev] ` title prefix, one recurring, one all-day offsite |
 
 One note includes a `::secret` block so you can verify the secret-strip path.
 
@@ -49,4 +50,5 @@ Exit codes match the other dev tools:
 | 6    | Team slug not found                    |
 | 8    | Unknown `--context` value              |
 
-stdout is a single-line JSON summary: `{"notes":N,"contacts":N,"todos":N,"reseeded":true|false}`.
+stdout is a single-line JSON summary:
+`{"notes":N,"contacts":N,"todos":N,"events":N,"reseeded":true|false}`.
