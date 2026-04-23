@@ -20,9 +20,9 @@ Hand-execute after shipping Phase 5. Run top-to-bottom; each section stands alon
 
 ## 1. MCP surface — every tool reachable
 
-**1.1 `tools/list` returns all five tools.**
+**1.1 `tools/list` returns every registered tool.**
 - Action: in Claude Code, ask "what fishbowl tools do you have?"
-- Expected: `search_memory`, `remember`, `get_memory`, `update_memory`, `list_pending`.
+- Expected: `search_memory`, `remember`, `get_memory`, `update_memory`, `list_pending`, `list_contacts`, `find_contact`. `OpenApiTests.OpenApi_IncludesContactsEndpoint_Test` covers the HTTP side; `Mcp_ToolsList_ReturnsAllRegisteredTools` covers this MCP list.
 - If not: `ToolRegistry` DI binding; check `Program.cs` scoped registration order.
 
 **1.2 `initialize` succeeds.**
@@ -161,6 +161,24 @@ Hand-execute after shipping Phase 5. Run top-to-bottom; each section stands alon
 **8.1 Personal Bearer on team URL → 403.**
 - Only runs once you've created a team. Personal-scoped key trying `GET /api/v1/teams/{slug}/notes` must be rejected even if you're a member.
 - Expected: 403. The token's context, not the user's membership, is authoritative.
+
+---
+
+## 8a. Contacts (list + find)
+
+**8a.1 `list_contacts` returns the current context's address book.**
+- Action: Claude Code: "list my fishbowl contacts".
+- Expected: all non-archived contacts for the active context; each entry has `name`, `email`, `phone`, `notes`, `archived: false`, `updatedAt`. Archived rows default-hidden — pass `include_archived: true` to see them.
+- If not: `IContactRepository` DI wiring, or `ListContactsTool` registration in `Program.cs`.
+
+**8a.2 `find_contact` full-text search matches across fields.**
+- Action: seed (`dotnet run --project tools/seed-dev-data`) then Claude Code: "find the contact called Venue Engineer" / "find the catering person".
+- Expected: the seeded contact with matching `name`/`email`/`phone`/`notes` ranks top. Hyphenated queries work (tokenizer strips `-` before FTS sees it).
+- If not: `ContactRepository.SearchAsync` tokenizer, or the FTS5 virtual table is out of sync with `contacts` (check migration v5).
+
+**8a.3 `read:contacts` scope gating.**
+- Action: mint a key without `read:contacts`. Claude Code's `find_contact` call.
+- Expected: JSON-RPC error envelope (code from the dispatcher's scope-check path). Browser-side cookie path keeps working in parallel — scopes only apply to Bearer.
 
 ---
 
