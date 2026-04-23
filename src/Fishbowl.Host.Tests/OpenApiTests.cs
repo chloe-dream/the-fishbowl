@@ -64,4 +64,17 @@ public class OpenApiTests : IClassFixture<WebApplicationFactory<Program>>
 
         Assert.Contains("\"SearchNotes\"", body);
     }
+
+    [Fact]
+    public async Task OpenApi_IncludesEventsEndpoint_Test()
+    {
+        var client = _factory.CreateClient();
+        var body = await client.GetStringAsync("/api/openapi.json",
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains("/api/v1/events", body);
+        Assert.Contains("\"ListEvents\"", body);
+        Assert.Contains("\"CreateEvent\"", body);
+        Assert.Contains("\"DeleteEvent\"", body);
+    }
 }

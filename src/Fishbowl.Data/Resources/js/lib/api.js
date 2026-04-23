@@ -81,10 +81,24 @@
         return request(`${ctx("/contacts/search")}?${qs.toString()}`);
     };
 
+    // Events list accepts { from, to } as a chronological range — maps to
+    // the server's half-open [from, to) query. Both must be Date-ish
+    // (Date or ISO-8601 string).
+    function listEvents(opts) {
+        if (!opts || !opts.from || !opts.to) return request(ctx("/events"));
+        const from = opts.from instanceof Date ? opts.from.toISOString() : opts.from;
+        const to   = opts.to   instanceof Date ? opts.to.toISOString()   : opts.to;
+        const qs = new URLSearchParams({ from, to });
+        return request(`${ctx("/events")}?${qs.toString()}`);
+    }
+    const events = crud("events");
+    events.list = listEvents;
+
     fb.api = {
         notes,
         todos: crud("todos"),
         contacts,
+        events,
         tags: {
             list:        ()                  => request(ctx("/tags")),
             upsertColor: (name, color)       => request(ctx(`/tags/${encodeURIComponent(name)}`),

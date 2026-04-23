@@ -484,6 +484,102 @@ public static class TeamsApi
         })
         .WithName("ReindexTeamSearch");
 
+        // ────────── Nested: team events ──────────
+
+        group.MapGet("/{slug}/events", async (
+            string slug,
+            ClaimsPrincipal user, ITeamRepository teams, IEventRepository events,
+            DateTime? from = null, DateTime? to = null, CancellationToken ct = default) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+
+            if ((from is null) != (to is null))
+                return Results.BadRequest(new { error = "from and to must both be provided or both omitted" });
+
+            var teamCtx = ContextRef.Team(resolved.Team!.Id);
+            if (from is not null)
+                return Results.Ok(await events.GetRangeAsync(teamCtx, from.Value, to!.Value, ct));
+            return Results.Ok(await events.GetAllAsync(teamCtx, ct));
+        })
+        .WithName("ListTeamEvents")
+        .RequireScope("read:events");
+
+        group.MapGet("/{slug}/events/{id}", async (
+            string slug, string id,
+            ClaimsPrincipal user, ITeamRepository teams, IEventRepository events,
+            CancellationToken ct) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            var item = await events.GetByIdAsync(ContextRef.Team(resolved.Team!.Id), id, ct);
+            return item is not null ? Results.Ok(item) : Results.NotFound();
+        })
+        .WithName("GetTeamEvent")
+        .RequireScope("read:events");
+
+        group.MapPost("/{slug}/events", async (
+            string slug, Event evt,
+            ClaimsPrincipal user, ITeamRepository teams, IEventRepository events,
+            CancellationToken ct) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
+
+            try
+            {
+                var actorId = user.FindFirst(McpContextClaims.UserId)!.Value;
+                var id = await events.CreateAsync(
+                    ContextRef.Team(resolved.Team!.Id), actorId, evt, ct);
+                return Results.Created($"/api/v1/teams/{slug}/events/{id}", evt);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        })
+        .WithName("CreateTeamEvent")
+        .RequireScope("write:events");
+
+        group.MapPut("/{slug}/events/{id}", async (
+            string slug, string id, Event evt,
+            ClaimsPrincipal user, ITeamRepository teams, IEventRepository events,
+            CancellationToken ct) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
+
+            evt.Id = id;
+            try
+            {
+                var ok = await events.UpdateAsync(ContextRef.Team(resolved.Team!.Id), evt, ct);
+                return ok ? Results.NoContent() : Results.NotFound();
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        })
+        .WithName("UpdateTeamEvent")
+        .RequireScope("write:events");
+
+        group.MapDelete("/{slug}/events/{id}", async (
+            string slug, string id,
+            ClaimsPrincipal user, ITeamRepository teams, IEventRepository events,
+            CancellationToken ct) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            if (!resolved.Role!.Value.CanWrite()) return Results.Forbid();
+
+            var ok = await events.DeleteAsync(ContextRef.Team(resolved.Team!.Id), id, ct);
+            return ok ? Results.NoContent() : Results.NotFound();
+        })
+        .WithName("DeleteTeamEvent")
+        .RequireScope("write:events");
+
         // ────────── Nested: team DB export (cookie-only, owner-only) ──────────
         // A team DB copy is a terminal, migrate-your-data-out action — owner
         // only, same rule as team deletion. Members already have read access
