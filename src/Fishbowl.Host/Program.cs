@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using LettuceEncrypt;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
@@ -34,6 +35,35 @@ builder.Services.AddSingleton<IResourceProvider, ResourceProvider>(sp =>
 var dataPath = builder.Configuration["data"] ?? "fishbowl-data";
 builder.Services.AddSingleton<DatabaseFactory>(sp =>
     new DatabaseFactory(dataPath, sp.GetRequiredService<ILogger<DatabaseFactory>>()));
+
+// LettuceEncrypt — self-hosted ACME. Reads domains/email/ToS from system.db
+// synchronously (too early for the normal ConfigurationCache flow, which is
+// a hosted service). Only activates when all three are set; otherwise we
+// boot HTTP-only so the operator can reach /setup on a fresh install.
+// Cert + state persist under fishbowl-data/acme/ so they survive restarts.
+// Renewal requires port 80 to stay reachable from the internet (HTTP-01).
+var acme = Fishbowl.Host.Configuration.BootConfig.LoadAcme(dataPath);
+if (acme is { IsValid: true })
+{
+    builder.Services.AddLettuceEncrypt(options =>
+    {
+        options.AcceptTermsOfService = true;
+        options.DomainNames = acme.Domains.ToArray();
+        options.EmailAddress = acme.Email;
+    })
+    .PersistDataToDirectory(
+        new DirectoryInfo(Path.Combine(dataPath, "acme")),
+        pfxPassword: null);
+
+    builder.WebHost.ConfigureKestrel(kestrel =>
+    {
+        // Port 80 handles HTTP→HTTPS redirects and the ACME HTTP-01 challenge.
+        // Port 443 gets its cert injected by LettuceEncrypt at request time
+        // (null-arg UseHttps pulls from the registered ServerCertificateSelector).
+        kestrel.ListenAnyIP(80);
+        kestrel.ListenAnyIP(443, lo => lo.UseHttps());
+    });
+}
 
 // Register Repositories
 builder.Services.AddScoped<ISystemRepository, SystemRepository>();
@@ -398,10 +428,31 @@ app.MapPost("/api/setup", async (
         return Results.BadRequest(new { error = "ClientSecret must be at least 20 characters." });
     }
 
+    // Optional ACME fields. All-or-nothing: if any is set, all must be valid.
+    var anyAcme = !string.IsNullOrWhiteSpace(request.AcmeDomains)
+               || !string.IsNullOrWhiteSpace(request.AcmeEmail)
+               || request.AcmeAcceptTos;
+    if (anyAcme)
+    {
+        if (string.IsNullOrWhiteSpace(request.AcmeDomains))
+            return Results.BadRequest(new { error = "AcmeDomains required when enabling TLS (comma-separated hostnames)." });
+        if (string.IsNullOrWhiteSpace(request.AcmeEmail) || !request.AcmeEmail.Contains('@'))
+            return Results.BadRequest(new { error = "AcmeEmail must be a valid email address." });
+        if (!request.AcmeAcceptTos)
+            return Results.BadRequest(new { error = "You must accept the Let's Encrypt subscriber agreement." });
+    }
+
     await repo.SetConfigAsync("Google:ClientId", request.ClientId);
     await repo.SetConfigAsync("Google:ClientSecret", request.ClientSecret);
     cache.Set("Google:ClientId", request.ClientId);
     cache.Set("Google:ClientSecret", request.ClientSecret);
+
+    if (anyAcme)
+    {
+        await repo.SetConfigAsync("Acme:Domains", request.AcmeDomains!.Trim());
+        await repo.SetConfigAsync("Acme:Email", request.AcmeEmail!.Trim());
+        await repo.SetConfigAsync("Acme:AcceptTos", "true");
+    }
 
     // Invalidate AspNetCore's GoogleOptions cache. If the options were built
     // earlier (e.g. via a pre-setup probe) they'd contain "placeholder" values,
@@ -409,7 +460,9 @@ app.MapPost("/api/setup", async (
     // "invalid_client". Clearing forces a rebuild from the fresh cache values.
     googleOptionsCache.Clear();
 
-    return Results.Ok();
+    // ACME binding is decided at boot; signal that to the client so it can
+    // prompt the operator to restart.
+    return Results.Ok(new { acmeConfigured = anyAcme });
 });
 
 app.MapGet("/logout", async (HttpContext context) =>
@@ -520,5 +573,13 @@ static string GetContentType(string path)
 
 app.Run();
 
-public record SetupRequest(string ClientId, string ClientSecret);
+public record SetupRequest(
+    string ClientId,
+    string ClientSecret,
+    // ACME is optional — present only when the operator wants self-served TLS.
+    // All three must be supplied together; partial values are rejected.
+    // Takes effect after a restart (LettuceEncrypt binds at boot).
+    string? AcmeDomains = null,
+    string? AcmeEmail = null,
+    bool AcmeAcceptTos = false);
 public partial class Program { }

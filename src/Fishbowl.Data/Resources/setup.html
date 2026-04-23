@@ -38,6 +38,41 @@
                            placeholder="at least 20 characters"
                            required>
                 </div>
+
+                <details style="margin-top: 1rem;">
+                    <summary style="cursor: pointer; color: var(--text-muted); font-size: 0.9rem;">
+                        Automatic TLS (Let's Encrypt) — optional
+                    </summary>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0.75rem 0;">
+                        Fishbowl can issue and renew its own certificate. Requires a public
+                        domain pointing at this server and inbound ports 80 + 443. Takes
+                        effect after a restart.
+                    </p>
+                    <div class="form-group">
+                        <label for="acmeDomains">Domain name(s)</label>
+                        <input type="text"
+                               id="acmeDomains"
+                               name="acmeDomains"
+                               placeholder="fishbowl.example.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="acmeEmail">Contact email</label>
+                        <input type="email"
+                               id="acmeEmail"
+                               name="acmeEmail"
+                               placeholder="you@example.com">
+                    </div>
+                    <label style="display: flex; gap: 0.5rem; align-items: flex-start;
+                                  font-size: 0.85rem; color: var(--text-muted);">
+                        <input type="checkbox" id="acmeAcceptTos" style="margin-top: 0.2rem;">
+                        <span>
+                            I accept the
+                            <a href="https://letsencrypt.org/repository/"
+                               target="_blank" rel="noopener">Let's Encrypt subscriber agreement</a>.
+                        </span>
+                    </label>
+                </details>
+
                 <button type="submit" class="btn primary" style="width:100%; margin-top:1rem;">
                     Save &amp; Continue
                 </button>
@@ -73,18 +108,48 @@
                 return;
             }
 
+            // ACME fields — all optional, but all-or-nothing if the operator starts filling them in.
+            const acmeDomains = document.getElementById("acmeDomains").value.trim();
+            const acmeEmail = document.getElementById("acmeEmail").value.trim();
+            const acmeAcceptTos = document.getElementById("acmeAcceptTos").checked;
+            const anyAcme = acmeDomains || acmeEmail || acmeAcceptTos;
+            if (anyAcme) {
+                if (!acmeDomains) { showError("Enter at least one domain for TLS."); return; }
+                if (!acmeEmail || !acmeEmail.includes("@")) {
+                    showError("Enter a valid contact email for Let's Encrypt."); return;
+                }
+                if (!acmeAcceptTos) {
+                    showError("You must accept the Let's Encrypt subscriber agreement."); return;
+                }
+            }
+
             try {
+                const body = { clientId, clientSecret };
+                if (anyAcme) {
+                    body.acmeDomains = acmeDomains;
+                    body.acmeEmail = acmeEmail;
+                    body.acmeAcceptTos = true;
+                }
                 const res = await fetch("/api/setup", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ clientId, clientSecret })
+                    body: JSON.stringify(body)
                 });
                 if (!res.ok) {
-                    const body = await res.text();
-                    showError("Server rejected: " + body);
+                    const text = await res.text();
+                    showError("Server rejected: " + text);
                     return;
                 }
-                window.location.href = "/";
+                const result = await res.json().catch(() => ({}));
+                if (result?.acmeConfigured) {
+                    document.querySelector(".auth-card").innerHTML = `
+                        <h1>ALMOST THERE</h1>
+                        <p class="tagline">TLS is configured. Restart Fishbowl, then
+                        visit <strong>https://${acmeDomains.split(",")[0].trim()}</strong>
+                        to finish signing in.</p>`;
+                } else {
+                    window.location.href = "/";
+                }
             } catch (err) {
                 showError("Request failed: " + err.message);
             }
