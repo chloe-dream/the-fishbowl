@@ -341,6 +341,20 @@ public class ApiKeyAuthTests : IClassFixture<WebApplicationFactory<Program>>, ID
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
+    // Export endpoint is cookie-only (same rule as /api/v1/search/reindex).
+    // A valid Bearer token with full scopes still gets 403.
+    [Fact]
+    public async Task Export_BearerToken_Returns403()
+    {
+        var issued = await _keys.IssueAsync(AliceId, ContextRef.User(AliceId), "export-bearer",
+            new[] { "read:notes" }, TestContext.Current.CancellationToken);
+
+        var client = ClientWithToken(issued.RawToken);
+        var resp = await client.GetAsync("/api/v1/export/db",
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
     [Fact]
     public async Task ValidToken_UpdatesLastUsedAt()
     {

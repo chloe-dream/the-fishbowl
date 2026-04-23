@@ -3,6 +3,7 @@ using Fishbowl.Core;
 using Fishbowl.Core.Mcp;
 using Fishbowl.Core.Models;
 using Fishbowl.Core.Repositories;
+using Fishbowl.Data;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -354,6 +355,29 @@ public static class TeamsApi
             return Results.Ok(new { processed = result.Processed, failed = result.Failed });
         })
         .WithName("ReindexTeamSearch");
+
+        // ────────── Nested: team DB export (cookie-only, owner-only) ──────────
+        // A team DB copy is a terminal, migrate-your-data-out action — owner
+        // only, same rule as team deletion. Members already have read access
+        // through the API; this endpoint is about walking off with the whole
+        // database file.
+        group.MapGet("/{slug}/export/db", async (
+            string slug,
+            ClaimsPrincipal user, ITeamRepository teams, DatabaseFactory dbFactory, CancellationToken ct) =>
+        {
+            if (user.Identity?.AuthenticationType == McpContextClaims.BearerScheme)
+                return Results.Forbid();
+
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            if (!resolved.Role!.Value.CanDeleteTeam()) return Results.Forbid();
+
+            var teamCtx = ContextRef.Team(resolved.Team!.Id);
+            var bytes = await ExportApi.BackupContextAsync(dbFactory, teamCtx, ct);
+            var filename = $"fishbowl-team-{resolved.Team.Slug}-{DateTime.UtcNow:yyyyMMdd}.db";
+            return Results.File(bytes, "application/vnd.sqlite3", filename);
+        })
+        .WithName("ExportTeamDatabase");
 
         return group.RequireAuthorization();
     }
