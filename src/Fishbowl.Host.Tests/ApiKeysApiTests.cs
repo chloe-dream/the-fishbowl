@@ -209,9 +209,14 @@ public class ApiKeysApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
     [Fact]
     public async Task ListKeys_ReturnsOnlyCallersKeys_WithoutHash()
     {
-        await _keyRepo.IssueAsync(Alice, ContextRef.User(Alice), "a1",
+        // Names must be distinctive enough not to collide with random chars
+        // in a generated key prefix (e.g. "fb_live_9b1u" would match "b1").
+        // Use hyphenated strings that can't appear inside a hex-ish prefix.
+        const string aliceName = "alice-owned-key";
+        const string bobName   = "bob-owned-key";
+        await _keyRepo.IssueAsync(Alice, ContextRef.User(Alice), aliceName,
             new[] { "read:notes" }, TestContext.Current.CancellationToken);
-        await _keyRepo.IssueAsync(Bob, ContextRef.User(Bob), "b1",
+        await _keyRepo.IssueAsync(Bob, ContextRef.User(Bob), bobName,
             new[] { "read:notes" }, TestContext.Current.CancellationToken);
 
         var client = _factory.CreateClient();
@@ -221,8 +226,8 @@ public class ApiKeysApiTests : IClassFixture<WebApplicationFactory<Program>>, ID
         resp.EnsureSuccessStatusCode();
 
         var body = await resp.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-        Assert.Contains("a1", body);
-        Assert.DoesNotContain("b1", body);
+        Assert.Contains(aliceName, body);
+        Assert.DoesNotContain(bobName, body);
         Assert.DoesNotContain("keyHash", body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("key_hash", body, StringComparison.OrdinalIgnoreCase);
     }
