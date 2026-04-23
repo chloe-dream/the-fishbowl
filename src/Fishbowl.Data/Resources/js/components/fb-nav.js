@@ -73,6 +73,7 @@ class FbNav extends HTMLElement {
         container.innerHTML = items.map((item, i) => `
             <button class="toolbar-btn ${item.active ? "active" : ""}"
                     data-idx="${i}"
+                    ${item.disabled ? "disabled" : ""}
                     title="${(item.title || "").replace(/"/g, "&quot;")}">
                 <fb-icon name="${item.icon}"></fb-icon>
             </button>
@@ -81,6 +82,7 @@ class FbNav extends HTMLElement {
             btn.addEventListener("click", () => {
                 const idx = parseInt(btn.dataset.idx, 10);
                 const item = (window.fb?.toolbar?._items || [])[idx];
+                if (item?.disabled) return;
                 item?.onClick?.();
             });
         });
@@ -298,6 +300,14 @@ class FbNav extends HTMLElement {
                 .toolbar-btn.active {
                     background: rgba(59, 130, 246, 0.18);
                     color: var(--accent);
+                }
+                .toolbar-btn:disabled {
+                    opacity: 0.35;
+                    cursor: not-allowed;
+                }
+                .toolbar-btn:disabled:hover {
+                    background: none;
+                    color: #cbd5e1;
                 }
                 .toolbar-btn fb-icon { --icon-size: 18px; }
 

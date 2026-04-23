@@ -38,10 +38,24 @@ class FbNotesView extends HTMLElement {
 
     /** Top-nav toolbar for this view. Per-note actions (pin/archive/delete)
      *  already live on each list row on hover, so the toolbar is reserved
-     *  for view-scoped actions — tag management is the only one today. */
+     *  for view-scoped actions. Undo/redo proxy into the active editor;
+     *  their disabled state is driven by the editor's history-change event
+     *  via _refreshHistoryToolbar(). */
     _setViewToolbar() {
         fb.toolbar.set([
-            // Manual refresh — placeholder until we wire auto-refresh to
+            {
+                icon:     "undo",
+                title:    "Undo (Ctrl+Z)",
+                onClick:  () => this._editorUndo(),
+                disabled: true,
+            },
+            {
+                icon:     "redo",
+                title:    "Redo (Ctrl+Y)",
+                onClick:  () => this._editorRedo(),
+                disabled: true,
+            },
+            // Manual refresh - placeholder until we wire auto-refresh to
             // MCP writes landing. Order is left-to-right as rendered.
             {
                 icon:    "sync",
@@ -54,6 +68,28 @@ class FbNotesView extends HTMLElement {
                 onClick: () => this._openManageDialog(),
             },
         ]);
+    }
+
+    _editorUndo() {
+        const editor = this.querySelector("#content");
+        editor?.undo?.();
+    }
+
+    _editorRedo() {
+        const editor = this.querySelector("#content");
+        editor?.redo?.();
+    }
+
+    /** Flip the undo/redo toolbar buttons' disabled state from the editor's
+     *  latest history-change detail. Mutates the items in place then asks
+     *  the nav to re-render - fb.toolbar.set() would work too but re-renders
+     *  every item; this keeps the event cadence cheap on every keystroke. */
+    _refreshHistoryToolbar(detail) {
+        const items = fb.toolbar?._items;
+        if (!items || items.length < 2) return;
+        if (items[0]?.icon === "undo") items[0].disabled = !detail.canUndo;
+        if (items[1]?.icon === "redo") items[1].disabled = !detail.canRedo;
+        fb.toolbar._nav?.renderToolbar();
     }
 
     disconnectedCallback() {
@@ -418,38 +454,19 @@ class FbNotesView extends HTMLElement {
                     opacity: 0.4;
                 }
                 fb-notes-view .nv-content-input {
-                    /* Auto-grows to fit content via JS; overflow:hidden disables
-                       the textarea's internal scrollbar so the outer .nv-editor-body
-                       becomes the scroll container. That places the scrollbar at
-                       the viewport's right edge, running full-height from nav
-                       bottom to the footer, and lets the global scrollbar theme
-                       apply (textarea internal scrollbars are rendered differently
-                       on some browsers and can't be reliably themed). */
+                    /* fb-md-editor handles its own autosize and renders the
+                       Edit/Preview toggle. Styles here are a safety-net in
+                       case the component fails to upgrade (the element would
+                       show as an unknown inline element with no layout). */
                     display: block;
                     width: 100%;
                     min-height: 60vh;
-                    background: none;
-                    border: none;
-                    color: var(--text);
-                    font-family: inherit;
-                    font-size: 15px;
-                    line-height: 1.6;
-                    outline: none;
-                    resize: none;
-                    padding: 0;
-                    overflow: hidden;
-                }
-                fb-notes-view .nv-content-input::placeholder {
-                    color: var(--text-muted);
-                    opacity: 0.4;
                 }
 
-                /* Archived-note editor is read-only. Inputs get the readonly
-                   attr (caret suppressed, value unchangeable) and we dim them
-                   slightly so the state is visible. not-allowed cursor on
-                   hover reinforces it. */
-                fb-notes-view .nv-editor.readonly .nv-title-input,
-                fb-notes-view .nv-editor.readonly .nv-content-input {
+                /* Archived-note editor is read-only. The component's own
+                   readonly attribute hides its toggle and forces preview;
+                   the title input still gets the attr directly. */
+                fb-notes-view .nv-editor.readonly .nv-title-input {
                     opacity: 0.7;
                     cursor: not-allowed;
                 }
@@ -508,7 +525,7 @@ class FbNotesView extends HTMLElement {
                         </div>
                         <div id="editor" class="nv-editor" hidden>
                             <input id="title" class="nv-title-input" placeholder="Untitled"/>
-                            <textarea id="content" class="nv-content-input" placeholder="Start writing..."></textarea>
+                            <fb-md-editor id="content" class="nv-content-input" placeholder="Start writing..."></fb-md-editor>
                         </div>
                     </div>
                     <section class="nv-editor-tagbar" id="tagbar" hidden>
@@ -545,11 +562,12 @@ class FbNotesView extends HTMLElement {
         titleEl.addEventListener("blur",  () => this.flushSave());
         titleEl.addEventListener("input", () => this.scheduleAutoSave());
         const contentEl = this.querySelector("#content");
-        contentEl.addEventListener("blur",  () => this.flushSave());
-        contentEl.addEventListener("input", () => {
-            this.autosizeContent();
-            this.scheduleAutoSave();
-        });
+        // fb-md-editor re-dispatches `input` on every keystroke and `change`
+        // on blur-after-edit from its host, matching native textarea
+        // semantics. Autosize is handled inside the component.
+        contentEl.addEventListener("change", () => this.flushSave());
+        contentEl.addEventListener("input",  () => this.scheduleAutoSave());
+        contentEl.addEventListener("history-change", (e) => this._refreshHistoryToolbar(e.detail));
         const tagInput = this.querySelector("#tag-input");
         tagInput.addEventListener("change", () => {
             // Don't mutate note.tags here — saveSelected compares the
@@ -657,14 +675,6 @@ class FbNotesView extends HTMLElement {
         clearTimeout(this._saveDebounce);
         this._saveDebounce = null;
         await this.saveSelected();
-    }
-
-    /** Resize the textarea to fit its content so the outer editor body scrolls. */
-    autosizeContent() {
-        const el = this.querySelector("#content");
-        if (!el) return;
-        el.style.height = "auto";
-        el.style.height = el.scrollHeight + "px";
     }
 
     /** Kept as a thin alias for per-note callers (select, togglePinned) so
@@ -775,9 +785,8 @@ class FbNotesView extends HTMLElement {
         this.querySelector("#timestamp").textContent = this.formatFullTimestamp(note.updatedAt);
         this._applyReadOnly(note);
         this.updateToolbar(note);
-        // Resize the textarea to its content after the value is set. Defer to
-        // the next frame so layout has caught up with the new value.
-        requestAnimationFrame(() => this.autosizeContent());
+        // fb-md-editor autosizes itself on value-set (deferred to next
+        // frame internally), so no explicit autosize hook needed here.
         this.renderList();
     }
 
