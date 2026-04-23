@@ -33,6 +33,24 @@ public static class ContactsApi
         .Produces(StatusCodes.Status401Unauthorized)
         .RequireScope("read:contacts");
 
+        // Search lives *before* /{id} so its static segment wins routing —
+        // "search" would otherwise be indistinguishable from a contact id.
+        group.MapGet("/search", async (
+            ClaimsPrincipal user, IContactRepository repo,
+            string q, int limit = 50, CancellationToken ct = default) =>
+        {
+            var userId = user.FindFirst("fishbowl_user_id")?.Value;
+            if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+            var hits = await repo.SearchAsync(
+                Fishbowl.Core.ContextRef.User(userId), q ?? "", limit, ct);
+            return Results.Ok(hits);
+        })
+        .WithName("SearchContacts")
+        .WithSummary("FTS5 search across name/email/phone/notes, ranked by bm25.")
+        .Produces<IEnumerable<Contact>>()
+        .Produces(StatusCodes.Status401Unauthorized)
+        .RequireScope("read:contacts");
+
         group.MapGet("/{id}", async (
             string id, ClaimsPrincipal user, IContactRepository repo, CancellationToken ct) =>
         {

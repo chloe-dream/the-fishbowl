@@ -46,6 +46,41 @@ public class ContactRepository : IContactRepository
         return await db.QueryAsync<Contact>(new CommandDefinition(sql, cancellationToken: ct));
     }
 
+    // FTS5 query shape mirrors HybridSearchService.RunFtsAsync: split on
+    // non-alphanumerics, lowercase, prefix-match each token with `*`, AND
+    // them. Keeps query behaviour consistent with how contacts_fts indexes
+    // by default, and avoids `-` being parsed as NOT.
+    public async Task<IEnumerable<Contact>> SearchAsync(
+        ContextRef ctx, string query, int limit = 50, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return Array.Empty<Contact>();
+
+        var tokens = System.Text.RegularExpressions.Regex
+            .Matches(query, @"\w+")
+            .Select(m => m.Value.ToLowerInvariant())
+            .Where(t => t.Length > 0)
+            .Select(t => t + "*")
+            .ToList();
+        if (tokens.Count == 0) return Array.Empty<Contact>();
+        var ftsQuery = string.Join(" AND ", tokens);
+
+        var clamped = Math.Clamp(limit, 1, 500);
+
+        using var db = _dbFactory.CreateContextConnection(ctx);
+
+        const string sql = @"
+            SELECT c.*
+            FROM contacts_fts
+            JOIN contacts c ON c.rowid = contacts_fts.rowid
+            WHERE contacts_fts MATCH @q AND c.archived = 0
+            ORDER BY bm25(contacts_fts)
+            LIMIT @limit";
+
+        return await db.QueryAsync<Contact>(new CommandDefinition(
+            sql, new { q = ftsQuery, limit = clamped }, cancellationToken: ct));
+    }
+
     public async Task<string> CreateAsync(
         ContextRef ctx, string actorUserId, Contact contact, CancellationToken ct = default)
     {

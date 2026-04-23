@@ -11,6 +11,12 @@ public interface IContactRepository
 
     Task<Contact?> GetByIdAsync(ContextRef ctx, string id, CancellationToken ct = default);
     Task<IEnumerable<Contact>> GetAllAsync(ContextRef ctx, bool includeArchived = false, CancellationToken ct = default);
+
+    // FTS5-backed search across name/email/phone/notes, ranked by bm25.
+    // Empty/whitespace query returns an empty list. Archived rows are
+    // excluded — the user wants to *find someone*, not archaeology.
+    Task<IEnumerable<Contact>> SearchAsync(ContextRef ctx, string query, int limit = 50, CancellationToken ct = default);
+
     Task<string> CreateAsync(ContextRef ctx, string actorUserId, Contact contact, CancellationToken ct = default);
     Task<bool> UpdateAsync(ContextRef ctx, Contact contact, CancellationToken ct = default);
     Task<bool> DeleteAsync(ContextRef ctx, string id, CancellationToken ct = default);

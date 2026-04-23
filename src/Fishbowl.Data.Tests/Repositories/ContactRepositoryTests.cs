@@ -175,6 +175,90 @@ public class ContactRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task Search_EmptyQuery_ReturnsEmpty()
+    {
+        await _repo.CreateAsync(TestUserId, new Contact { Name = "Anyone" },
+            TestContext.Current.CancellationToken);
+
+        var hits = await _repo.SearchAsync(ContextRef.User(TestUserId), "   ",
+            ct: TestContext.Current.CancellationToken);
+        Assert.Empty(hits);
+    }
+
+    [Fact]
+    public async Task Search_MatchesNameEmailPhoneNotes()
+    {
+        await _repo.CreateAsync(TestUserId, new Contact
+        {
+            Name = "Alice",
+            Email = "alice@studio.example",
+            Phone = "+49-30-1234",
+            Notes = "Met at the venue sound check",
+        }, TestContext.Current.CancellationToken);
+
+        // Each field separately resolves the same contact — this proves the
+        // FTS5 virtual table is indexing all four columns, not just name.
+        foreach (var query in new[] { "alice", "studio", "1234", "venue" })
+        {
+            var hits = (await _repo.SearchAsync(ContextRef.User(TestUserId), query,
+                ct: TestContext.Current.CancellationToken)).ToList();
+            Assert.True(hits.Count == 1, $"expected 1 hit for '{query}', got {hits.Count}");
+            Assert.Equal("Alice", hits[0].Name);
+        }
+    }
+
+    [Fact]
+    public async Task Search_HyphenatedQuery_DoesNotParseAsNot()
+    {
+        // Bare `-` in an FTS5 MATCH query is the NOT operator. The repo's
+        // tokenizer must strip hyphens to prefix tokens before querying —
+        // same rule the existing HybridSearchService uses.
+        await _repo.CreateAsync(TestUserId, new Contact
+        {
+            Name = "Bob Partner",
+            Notes = "studio-in-charge",
+        }, TestContext.Current.CancellationToken);
+
+        var hits = (await _repo.SearchAsync(ContextRef.User(TestUserId),
+            "studio-in-charge",
+            ct: TestContext.Current.CancellationToken)).ToList();
+
+        Assert.Single(hits);
+        Assert.Equal("Bob Partner", hits[0].Name);
+    }
+
+    [Fact]
+    public async Task Search_ExcludesArchivedContacts()
+    {
+        await _repo.CreateAsync(TestUserId,
+            new Contact { Name = "Active Alice", Email = "a@a" },
+            TestContext.Current.CancellationToken);
+        await _repo.CreateAsync(TestUserId,
+            new Contact { Name = "Archived Alice", Email = "a@a", Archived = true },
+            TestContext.Current.CancellationToken);
+
+        var hits = (await _repo.SearchAsync(ContextRef.User(TestUserId), "alice",
+            ct: TestContext.Current.CancellationToken)).ToList();
+        Assert.Single(hits);
+        Assert.Equal("Active Alice", hits[0].Name);
+    }
+
+    [Fact]
+    public async Task Search_RespectsLimit()
+    {
+        for (var i = 0; i < 5; i++)
+        {
+            await _repo.CreateAsync(TestUserId,
+                new Contact { Name = $"Person {i}", Notes = "matching marker" },
+                TestContext.Current.CancellationToken);
+        }
+
+        var hits = (await _repo.SearchAsync(ContextRef.User(TestUserId), "marker",
+            limit: 2, ct: TestContext.Current.CancellationToken)).ToList();
+        Assert.Equal(2, hits.Count);
+    }
+
+    [Fact]
     public async Task TeamContext_IsolatedFromPersonal()
     {
         // Same in-memory factory, different ContextRef → different files.

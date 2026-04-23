@@ -275,6 +275,55 @@ public class ContactsApiTests : IClassFixture<WebApplicationFactory<Program>>, I
     }
 
     [Fact]
+    public async Task Search_ReturnsHits_FromAnyIndexedField()
+    {
+        var client = _factory.CreateClient();
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/contacts", UserA,
+            new Contact { Name = "Alice", Email = "alice@studio.example", Notes = "venue manager" }),
+            TestContext.Current.CancellationToken);
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/contacts", UserA,
+            new Contact { Name = "Bob", Email = "bob@home.example", Notes = "friend" }),
+            TestContext.Current.CancellationToken);
+
+        var resp = await client.SendAsync(
+            Req(HttpMethod.Get, "/api/v1/contacts/search?q=venue", UserA),
+            TestContext.Current.CancellationToken);
+        resp.EnsureSuccessStatusCode();
+        var hits = await resp.Content.ReadFromJsonAsync<List<Contact>>(
+            TestContext.Current.CancellationToken);
+        Assert.Single(hits!);
+        Assert.Equal("Alice", hits![0].Name);
+    }
+
+    [Fact]
+    public async Task Search_EmptyQuery_ReturnsEmpty()
+    {
+        var client = _factory.CreateClient();
+        await CreateAsync(client, UserA, "Anyone");
+
+        var resp = await client.SendAsync(
+            Req(HttpMethod.Get, "/api/v1/contacts/search?q=", UserA),
+            TestContext.Current.CancellationToken);
+        resp.EnsureSuccessStatusCode();
+        var hits = await resp.Content.ReadFromJsonAsync<List<Contact>>(
+            TestContext.Current.CancellationToken);
+        Assert.Empty(hits!);
+    }
+
+    [Fact]
+    public async Task TeamSearch_NonMember_Returns403()
+    {
+        var client = _factory.CreateClient();
+        await client.SendAsync(Req(HttpMethod.Post, "/api/v1/teams", UserA, new { name = "Search Private" }),
+            TestContext.Current.CancellationToken);
+
+        var resp = await client.SendAsync(
+            Req(HttpMethod.Get, "/api/v1/teams/search-private/contacts/search?q=anything", UserB),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
+    [Fact]
     public async Task TeamContacts_Readonly_CannotWrite()
     {
         var client = _factory.CreateClient();

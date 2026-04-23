@@ -103,6 +103,7 @@ builder.Services.AddScoped<IMcpTool, GetMemoryTool>();
 builder.Services.AddScoped<IMcpTool, UpdateMemoryTool>();
 builder.Services.AddScoped<IMcpTool, ListPendingTool>();
 builder.Services.AddScoped<IMcpTool, ListContactsTool>();
+builder.Services.AddScoped<IMcpTool, FindContactTool>();
 builder.Services.AddScoped<ToolRegistry>();
 
 // Load plugins from configured path (defaults to fishbowl-mods/plugins)

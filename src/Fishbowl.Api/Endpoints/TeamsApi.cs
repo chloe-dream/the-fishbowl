@@ -352,6 +352,20 @@ public static class TeamsApi
         .WithName("ListTeamContacts")
         .RequireScope("read:contacts");
 
+        group.MapGet("/{slug}/contacts/search", async (
+            string slug, string q,
+            ClaimsPrincipal user, ITeamRepository teams, IContactRepository contacts,
+            int limit = 50, CancellationToken ct = default) =>
+        {
+            var resolved = await ResolveTeamAsync(slug, user, teams, ct);
+            if (resolved.Error is not null) return resolved.Error;
+            var hits = await contacts.SearchAsync(
+                ContextRef.Team(resolved.Team!.Id), q ?? "", limit, ct);
+            return Results.Ok(hits);
+        })
+        .WithName("SearchTeamContacts")
+        .RequireScope("read:contacts");
+
         group.MapGet("/{slug}/contacts/{id}", async (
             string slug, string id,
             ClaimsPrincipal user, ITeamRepository teams, IContactRepository contacts,

@@ -41,6 +41,7 @@ public class OpenApiTests : IClassFixture<WebApplicationFactory<Program>>
         Assert.Contains("\"ListContacts\"", body);
         Assert.Contains("\"CreateContact\"", body);
         Assert.Contains("\"DeleteContact\"", body);
+        Assert.Contains("\"SearchContacts\"", body);
     }
 
     [Fact]

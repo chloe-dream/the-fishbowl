@@ -134,6 +134,7 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
         Assert.Contains("update_memory", names);
         Assert.Contains("list_pending", names);
         Assert.Contains("list_contacts", names);
+        Assert.Contains("find_contact", names);
     }
 
     [Fact]
@@ -483,6 +484,38 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
         Assert.True(resp.TryGetProperty("error", out var err),
             "expected JSON-RPC error envelope for missing scope");
         Assert.NotEqual(0, err.GetProperty("code").GetInt32());
+    }
+
+    [Fact]
+    public async Task Mcp_FindContact_ReturnsMatchingHits()
+    {
+        var contacts = new ContactRepository(_dbFactory);
+        await contacts.CreateAsync(AliceId,
+            new Fishbowl.Core.Models.Contact
+            {
+                Name = "Alice Example",
+                Email = "alice@studio.example",
+                Notes = "venue manager",
+            },
+            TestContext.Current.CancellationToken);
+        await contacts.CreateAsync(AliceId,
+            new Fishbowl.Core.Models.Contact
+            {
+                Name = "Carol",
+                Notes = "unrelated",
+            },
+            TestContext.Current.CancellationToken);
+
+        var client = await BearerClientAsync("read:contacts");
+        var resp = await CallToolAsync(client, "find_contact", new { query = "venue" });
+        var text = resp.GetProperty("result").GetProperty("content")[0]
+            .GetProperty("text").GetString();
+        using var doc = JsonDocument.Parse(text!);
+        var list = doc.RootElement.GetProperty("contacts");
+        var names = list.EnumerateArray()
+            .Select(c => c.GetProperty("name").GetString()).ToHashSet();
+        Assert.Contains("Alice Example", names);
+        Assert.DoesNotContain("Carol", names);
     }
 
     [Fact]
