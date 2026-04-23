@@ -26,4 +26,31 @@ public class OpenApiTests : IClassFixture<WebApplicationFactory<Program>>
         Assert.Contains("/api/v1/notes", body);
         Assert.Contains("/api/v1/todos", body);
     }
+
+    [Fact]
+    public async Task OpenApi_IncludesContactsEndpoint_Test()
+    {
+        // Catches accidental un-registration: if MapContactsApi() is dropped
+        // from Program.cs, the OpenAPI doc silently loses the path — this
+        // assertion flags that before it ships.
+        var client = _factory.CreateClient();
+        var body = await client.GetStringAsync("/api/openapi.json",
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains("/api/v1/contacts", body);
+        Assert.Contains("\"ListContacts\"", body);
+        Assert.Contains("\"CreateContact\"", body);
+        Assert.Contains("\"DeleteContact\"", body);
+    }
+
+    [Fact]
+    public async Task OpenApi_IncludesExportEndpoint_Test()
+    {
+        var client = _factory.CreateClient();
+        var body = await client.GetStringAsync("/api/openapi.json",
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains("/api/v1/export/db", body);
+        Assert.Contains("\"ExportUserDatabase\"", body);
+    }
 }

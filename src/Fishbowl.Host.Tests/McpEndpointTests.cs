@@ -113,7 +113,7 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
     }
 
     [Fact]
-    public async Task Mcp_ToolsList_ReturnsAllFiveTools()
+    public async Task Mcp_ToolsList_ReturnsAllRegisteredTools()
     {
         var client = await BearerClientAsync();
         var resp = await client.PostAsync("/mcp",
@@ -126,12 +126,14 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
         var tools = doc.RootElement.GetProperty("result").GetProperty("tools");
         var names = tools.EnumerateArray().Select(t => t.GetProperty("name").GetString()).ToHashSet();
 
-        Assert.Equal(5, names.Count);
+        // Assert each known tool is present rather than the exact count —
+        // additions elsewhere shouldn't require touching this test.
         Assert.Contains("search_memory", names);
         Assert.Contains("remember", names);
         Assert.Contains("get_memory", names);
         Assert.Contains("update_memory", names);
         Assert.Contains("list_pending", names);
+        Assert.Contains("list_contacts", names);
     }
 
     [Fact]
@@ -429,6 +431,58 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
             .Select(n => n.GetProperty("title").GetString()).ToHashSet();
         Assert.Contains("pending-1", titles);
         Assert.DoesNotContain("approved-1", titles);
+    }
+
+    [Fact]
+    public async Task Mcp_ListContacts_ReturnsPersistedContacts()
+    {
+        var contacts = new ContactRepository(_dbFactory);
+        await contacts.CreateAsync(AliceId,
+            new Fishbowl.Core.Models.Contact
+            {
+                Name = "Alice Example",
+                Email = "alice@example.com",
+                Phone = "+1-555",
+            },
+            TestContext.Current.CancellationToken);
+        await contacts.CreateAsync(AliceId,
+            new Fishbowl.Core.Models.Contact
+            {
+                Name = "Shelved",
+                Archived = true,
+            },
+            TestContext.Current.CancellationToken);
+
+        var client = await BearerClientAsync("read:contacts");
+        var resp = await CallToolAsync(client, "list_contacts", new { });
+        var text = resp.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString();
+        using var doc = JsonDocument.Parse(text!);
+        var list = doc.RootElement.GetProperty("contacts");
+        var names = list.EnumerateArray()
+            .Select(c => c.GetProperty("name").GetString()).ToHashSet();
+
+        Assert.Contains("Alice Example", names);
+        Assert.DoesNotContain("Shelved", names);   // archived hidden by default
+
+        // One of the entries has the rich fields populated — sanity check
+        // that email/phone aren't dropped by the MCP wrapper.
+        var alice = list.EnumerateArray()
+            .Single(c => c.GetProperty("name").GetString() == "Alice Example");
+        Assert.Equal("alice@example.com", alice.GetProperty("email").GetString());
+        Assert.Equal("+1-555", alice.GetProperty("phone").GetString());
+    }
+
+    [Fact]
+    public async Task Mcp_ListContacts_WithoutContactsScope_Returns403Envelope()
+    {
+        // Scope gating for the new contacts tool — the dispatcher returns a
+        // JSON-RPC error with code -32000 when the Bearer token is missing
+        // the required scope, mirroring how other write:* gates behave.
+        var client = await BearerClientAsync("read:notes");  // no read:contacts
+        var resp = await CallToolAsync(client, "list_contacts", new { });
+        Assert.True(resp.TryGetProperty("error", out var err),
+            "expected JSON-RPC error envelope for missing scope");
+        Assert.NotEqual(0, err.GetProperty("code").GetInt32());
     }
 
     [Fact]
