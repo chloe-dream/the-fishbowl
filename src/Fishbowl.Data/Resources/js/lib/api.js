@@ -94,6 +94,19 @@
     const events = crud("events");
     events.list = listEvents;
 
+    // Common shortcuts for the calendar view. All resolve to the same
+    // /events?from=&to= range query server-side.
+    events.upcoming = (days = 7) => {
+        const from = new Date();
+        const to   = new Date(from.getTime() + days * 86400_000);
+        return listEvents({ from, to });
+    };
+    events.today = () => {
+        const from = new Date(); from.setHours(0, 0, 0, 0);
+        const to   = new Date(from.getTime() + 86400_000);
+        return listEvents({ from, to });
+    };
+
     fb.api = {
         notes,
         todos: crud("todos"),
