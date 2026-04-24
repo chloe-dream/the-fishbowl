@@ -34,7 +34,7 @@ class FbNotesView extends HTMLElement {
         // notes (plus currently-selected ones), so no UI toggle is needed.
         this.tagFilter = { tags: [] };
         // Chip strip is clamped to ~3 rows by default; when the tag list
-        // overflows, a "+ more" toggle opens the full strip. Sticky across
+        // overflows, a "more" toggle opens the full strip. Sticky across
         // re-renders so the state doesn't reset on chip clicks.
         this._tagFilterExpanded = false;
         this._saveDebounce = null;
@@ -492,31 +492,59 @@ class FbNotesView extends HTMLElement {
                     gap: 4px;
                     padding: 10px 12px 8px;
                     border-bottom: 1px solid var(--border);
+                    transition: border-bottom-color 0.1s;
+                }
+                /* When the hanging toggle is hovered, brighten the whole
+                 * separator line in sync so the tab + line read as one
+                 * affordance. :has() is widely supported now (Chromium 105,
+                 * Firefox 121, Safari 15.4). */
+                fb-notes-view .nv-tag-filter:has(+ .nv-tag-filter-toggle:hover) {
+                    border-bottom-color: var(--text-muted);
                 }
                 fb-notes-view .nv-tag-filter[hidden] { display: none !important; }
-                /* ~3 rows of chips; the mask fade hints there's more below. */
+                /* ~3 rows of chips; the hanging toggle signals there's more.
+                 * A short gradient overlay at the bottom fades the chipped-off
+                 * row into the panel colour so the hard clip edge softens
+                 * without hiding the separator line (the ::after is inside
+                 * the padding box; the border-bottom paints after). */
                 fb-notes-view .nv-tag-filter.collapsed {
                     max-height: 82px;
                     overflow: hidden;
-                    mask-image: linear-gradient(to bottom, black 70%, transparent);
-                    -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent);
+                    position: relative;
                 }
+                fb-notes-view .nv-tag-filter.collapsed::after {
+                    content: "";
+                    position: absolute;
+                    inset: auto 0 0 0;
+                    height: 6px;
+                    background: linear-gradient(to bottom, transparent, var(--panel));
+                    pointer-events: none;
+                }
+                /* "more" / "less" — a tab hanging from the tag-filter's
+                 * bottom border like a drawer pull. The -1px negative top margin
+                 * drops its top edge ONTO the line (so the line appears to flow
+                 * straight into the tab's side walls); top border is suppressed,
+                 * only the bottom corners are rounded. */
                 fb-notes-view .nv-tag-filter-toggle {
-                    align-self: flex-start;
-                    margin: -2px 12px 8px;
-                    background: transparent;
+                    align-self: center;
+                    margin-top: -1px;
+                    margin-bottom: 6px;
+                    background: var(--panel);
                     border: 1px solid var(--border);
-                    border-radius: 10px;
-                    padding: 2px 10px;
+                    border-top: none;
+                    border-radius: 0 0 10px 10px;
+                    padding: 2px 14px 3px;
                     color: var(--text-muted);
                     font: inherit;
                     font-size: 11px;
+                    line-height: 1.3;
                     cursor: pointer;
+                    position: relative;
                     transition: color 0.1s, border-color 0.1s;
                 }
                 fb-notes-view .nv-tag-filter-toggle:hover {
                     color: var(--text);
-                    border-color: var(--accent);
+                    border-color: var(--text-muted);
                 }
                 fb-notes-view .nv-tag-filter-toggle[hidden] { display: none !important; }
                 fb-notes-view .nv-editor-body {
@@ -670,7 +698,7 @@ class FbNotesView extends HTMLElement {
             const strip = this.querySelector("#tag-filter");
             const btn = this.querySelector("#tag-filter-toggle");
             strip.classList.toggle("collapsed", !this._tagFilterExpanded);
-            btn.textContent = this._tagFilterExpanded ? "show less" : "+ more";
+            btn.textContent = this._tagFilterExpanded ? "less" : "more";
         });
         this.querySelector("#search-input").addEventListener("input", (e) => {
             const q = e.target.value.trim();
@@ -722,7 +750,7 @@ class FbNotesView extends HTMLElement {
      *
      *  Chips are sorted by usage frequency (descending) so the tags the
      *  user touches most live at the top. The strip is clamped to ~3 rows
-     *  with a "+ more" toggle when the set overflows. */
+     *  with a "more" toggle when the set overflows. */
     async _renderTagFilter() {
         const strip = this.querySelector("#tag-filter");
         const toggle = this.querySelector("#tag-filter-toggle");
@@ -783,7 +811,7 @@ class FbNotesView extends HTMLElement {
 
             if (toggle) {
                 toggle.hidden = !overflows;
-                toggle.textContent = this._tagFilterExpanded ? "show less" : "+ more";
+                toggle.textContent = this._tagFilterExpanded ? "less" : "more";
             }
             if (overflows && !this._tagFilterExpanded) {
                 strip.classList.add("collapsed");
