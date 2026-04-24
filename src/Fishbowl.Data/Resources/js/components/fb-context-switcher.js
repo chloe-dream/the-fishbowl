@@ -218,7 +218,7 @@ class FbContextSwitcher extends HTMLElement {
         const manage = this.shadowRoot.querySelector('[data-action="manage"]');
         manage?.addEventListener("click", () => {
             this._setOpen(false);
-            fb.router?.navigate?.("#/settings/teams");
+            fb.router?.navigate?.("#/teams");
         });
     }
 
