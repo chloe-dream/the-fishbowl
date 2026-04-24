@@ -33,10 +33,8 @@ class FbNotesView extends HTMLElement {
         // after each click to only show tags that appear on the remaining
         // notes (plus currently-selected ones), so no UI toggle is needed.
         this.tagFilter = { tags: [] };
-        // Chip strip is clamped to ~3 rows by default; when the tag list
-        // overflows, a "more" toggle opens the full strip. Sticky across
-        // re-renders so the state doesn't reset on chip clicks.
-        this._tagFilterExpanded = false;
+        // Clamp + "more"/"less" tab is owned by <fb-collapsible> around
+        // the chip strip; expanded state lives on that element, not here.
         this._saveDebounce = null;
         this._onTagsInvalidated = () => this._renderTagFilter();
     }
@@ -485,68 +483,16 @@ class FbNotesView extends HTMLElement {
                 }
 
                 /* --- TAG FILTER STRIP (list pane) ----------------------------- */
+                /* Just the chip row layout — clamp, fade, separator line
+                 * and the "more"/"less" tab all come from <fb-collapsible>. */
                 fb-notes-view .nv-tag-filter {
                     display: flex;
                     flex-wrap: wrap;
                     align-items: center;
                     gap: 4px;
                     padding: 10px 12px 8px;
-                    border-bottom: 1px solid var(--border);
-                    transition: border-bottom-color 0.1s;
                 }
-                /* When the hanging toggle is hovered, brighten the whole
-                 * separator line in sync so the tab + line read as one
-                 * affordance. :has() is widely supported now (Chromium 105,
-                 * Firefox 121, Safari 15.4). */
-                fb-notes-view .nv-tag-filter:has(+ .nv-tag-filter-toggle:hover) {
-                    border-bottom-color: var(--text-muted);
-                }
-                fb-notes-view .nv-tag-filter[hidden] { display: none !important; }
-                /* ~3 rows of chips; the hanging toggle signals there's more.
-                 * A short gradient overlay at the bottom fades the chipped-off
-                 * row into the panel colour so the hard clip edge softens
-                 * without hiding the separator line (the ::after is inside
-                 * the padding box; the border-bottom paints after). */
-                fb-notes-view .nv-tag-filter.collapsed {
-                    max-height: 82px;
-                    overflow: hidden;
-                    position: relative;
-                }
-                fb-notes-view .nv-tag-filter.collapsed::after {
-                    content: "";
-                    position: absolute;
-                    inset: auto 0 0 0;
-                    height: 6px;
-                    background: linear-gradient(to bottom, transparent, var(--panel));
-                    pointer-events: none;
-                }
-                /* "more" / "less" — a tab hanging from the tag-filter's
-                 * bottom border like a drawer pull. The -1px negative top margin
-                 * drops its top edge ONTO the line (so the line appears to flow
-                 * straight into the tab's side walls); top border is suppressed,
-                 * only the bottom corners are rounded. */
-                fb-notes-view .nv-tag-filter-toggle {
-                    align-self: center;
-                    margin-top: -1px;
-                    margin-bottom: 6px;
-                    background: var(--panel);
-                    border: 1px solid var(--border);
-                    border-top: none;
-                    border-radius: 0 0 10px 10px;
-                    padding: 2px 14px 3px;
-                    color: var(--text-muted);
-                    font: inherit;
-                    font-size: 11px;
-                    line-height: 1.3;
-                    cursor: pointer;
-                    position: relative;
-                    transition: color 0.1s, border-color 0.1s;
-                }
-                fb-notes-view .nv-tag-filter-toggle:hover {
-                    color: var(--text);
-                    border-color: var(--text-muted);
-                }
-                fb-notes-view .nv-tag-filter-toggle[hidden] { display: none !important; }
+                fb-notes-view .nv-tag-collapsible[hidden] { display: none !important; }
                 fb-notes-view .nv-editor-body {
                     flex: 1;
                     overflow: auto;
@@ -642,8 +588,9 @@ class FbNotesView extends HTMLElement {
                     <div class="nv-search-hint" id="search-degraded-hint" hidden>
                         Full-text ranking — embeddings still loading.
                     </div>
-                    <div class="nv-tag-filter" id="tag-filter" hidden></div>
-                    <button class="nv-tag-filter-toggle" id="tag-filter-toggle" type="button" hidden>+ more</button>
+                    <fb-collapsible class="nv-tag-collapsible" id="tag-filter-wrapper" max-height="82px" hidden>
+                        <div class="nv-tag-filter" id="tag-filter"></div>
+                    </fb-collapsible>
                     <div class="nv-list-header">
                         <span class="nv-list-title" id="list-title">All Notes</span>
                         <button class="nv-icon-btn" id="toggle-archived-btn" title="Show archived">
@@ -692,13 +639,6 @@ class FbNotesView extends HTMLElement {
             this.querySelector("#toggle-archived-btn").classList.toggle("active", this.showArchived);
             this.querySelector("#list-title").textContent = this.showArchived ? "All + Archived" : "All Notes";
             this.renderList();
-        });
-        this.querySelector("#tag-filter-toggle").addEventListener("click", () => {
-            this._tagFilterExpanded = !this._tagFilterExpanded;
-            const strip = this.querySelector("#tag-filter");
-            const btn = this.querySelector("#tag-filter-toggle");
-            strip.classList.toggle("collapsed", !this._tagFilterExpanded);
-            btn.textContent = this._tagFilterExpanded ? "less" : "more";
         });
         this.querySelector("#search-input").addEventListener("input", (e) => {
             const q = e.target.value.trim();
@@ -752,8 +692,8 @@ class FbNotesView extends HTMLElement {
      *  user touches most live at the top. The strip is clamped to ~3 rows
      *  with a "more" toggle when the set overflows. */
     async _renderTagFilter() {
+        const wrapper = this.querySelector("#tag-filter-wrapper");
         const strip = this.querySelector("#tag-filter");
-        const toggle = this.querySelector("#tag-filter-toggle");
         if (!strip) return;
         let allTags = [];
         try {
@@ -779,10 +719,8 @@ class FbNotesView extends HTMLElement {
         }
 
         if (visible.length === 0) {
-            strip.hidden = true;
+            if (wrapper) wrapper.hidden = true;
             strip.innerHTML = "";
-            strip.classList.remove("collapsed");
-            if (toggle) toggle.hidden = true;
             return;
         }
 
@@ -792,31 +730,13 @@ class FbNotesView extends HTMLElement {
             return diff !== 0 ? diff : a.name.localeCompare(b.name);
         });
 
-        strip.hidden = false;
+        if (wrapper) wrapper.hidden = false;
         strip.innerHTML = visible.map(t =>
             `<fb-tag-chip name="${t.name}" color="${t.color}" clickable
                           ${selected.has(t.name) ? "selected" : ""}></fb-tag-chip>`
         ).join("");
-
-        // Decide whether the collapse toggle is needed. Measure against
-        // the un-clamped layout, then re-apply whatever state the user
-        // last asked for. rAF so custom elements have laid out first.
-        strip.classList.remove("collapsed");
-        requestAnimationFrame(() => {
-            const naturalHeight = strip.scrollHeight;
-            strip.classList.add("collapsed");
-            const clampedHeight = strip.clientHeight;
-            strip.classList.remove("collapsed");
-            const overflows = naturalHeight > clampedHeight + 1;
-
-            if (toggle) {
-                toggle.hidden = !overflows;
-                toggle.textContent = this._tagFilterExpanded ? "less" : "more";
-            }
-            if (overflows && !this._tagFilterExpanded) {
-                strip.classList.add("collapsed");
-            }
-        });
+        // <fb-collapsible> listens to slotchange + ResizeObserver, so it
+        // re-measures overflow on its own after the innerHTML swap.
 
         strip.querySelectorAll("fb-tag-chip").forEach(chip => {
             chip.addEventListener("click", async () => {
