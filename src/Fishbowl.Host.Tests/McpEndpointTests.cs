@@ -135,6 +135,7 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
         Assert.Contains("list_pending", names);
         Assert.Contains("list_contacts", names);
         Assert.Contains("find_contact", names);
+        Assert.Contains("list_events", names);
     }
 
     [Fact]
@@ -484,6 +485,34 @@ public class McpEndpointTests : IClassFixture<WebApplicationFactory<Program>>, I
         Assert.True(resp.TryGetProperty("error", out var err),
             "expected JSON-RPC error envelope for missing scope");
         Assert.NotEqual(0, err.GetProperty("code").GetInt32());
+    }
+
+    [Fact]
+    public async Task Mcp_ListEvents_RespectsUpcomingDaysShortcut()
+    {
+        var eventRepo = new EventRepository(_dbFactory);
+        var now = DateTime.UtcNow;
+        await eventRepo.CreateAsync(AliceId, new Fishbowl.Core.Models.Event
+        {
+            Title = "soon",
+            StartAt = now.AddDays(2),
+        }, TestContext.Current.CancellationToken);
+        await eventRepo.CreateAsync(AliceId, new Fishbowl.Core.Models.Event
+        {
+            Title = "later",
+            StartAt = now.AddDays(30),
+        }, TestContext.Current.CancellationToken);
+
+        var client = await BearerClientAsync("read:events");
+        var resp = await CallToolAsync(client, "list_events", new { upcoming_days = 7 });
+        var text = resp.GetProperty("result").GetProperty("content")[0]
+            .GetProperty("text").GetString();
+        using var doc = JsonDocument.Parse(text!);
+        var list = doc.RootElement.GetProperty("events");
+        var titles = list.EnumerateArray()
+            .Select(e => e.GetProperty("title").GetString()).ToHashSet();
+        Assert.Contains("soon", titles);
+        Assert.DoesNotContain("later", titles);
     }
 
     [Fact]
