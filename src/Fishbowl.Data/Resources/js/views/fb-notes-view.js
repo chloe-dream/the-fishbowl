@@ -8,7 +8,9 @@
  *     pin actions in the top-left of the header.
  *
  * Pinned notes always sort first; archived are hidden unless the archive
- * button is toggled. Search filters title + content.
+ * button is toggled. Typing in the search input hits the hybrid ranker at
+ * /api/v1/search (vector + FTS blend) — results keep server score order
+ * and skip the pinned-first boost so relevance stays visible.
  *
  * Light-DOM so app.css tokens apply; all component-specific CSS is scoped
  * with `fb-notes-view` to avoid leaking into other views.
@@ -19,11 +21,22 @@ class FbNotesView extends HTMLElement {
         this.notes = [];
         this.selectedId = null;
         this.showArchived = false;
-        this.searchQuery = "";
+        // Search state. When searchActive, `this.notes` holds the ranked
+        // server results (in score order). An empty input flips back to
+        // browse mode and triggers a full loadNotes(). The seq counter
+        // guards against out-of-order responses from rapid typing.
+        this.searchActive = false;
+        this.searchDegraded = false;
+        this._searchDebounce = null;
+        this._searchSeq = 0;
         // Tag filter is always AND ("match all"). The strip narrows itself
         // after each click to only show tags that appear on the remaining
         // notes (plus currently-selected ones), so no UI toggle is needed.
         this.tagFilter = { tags: [] };
+        // Chip strip is clamped to ~3 rows by default; when the tag list
+        // overflows, a "+ more" toggle opens the full strip. Sticky across
+        // re-renders so the state doesn't reset on chip clicks.
+        this._tagFilterExpanded = false;
         this._saveDebounce = null;
         this._onTagsInvalidated = () => this._renderTagFilter();
     }
@@ -113,6 +126,68 @@ class FbNotesView extends HTMLElement {
         }
     }
 
+    /** Hybrid search path — calls /api/v1/search (vector+FTS blend) and
+     *  parks the ranked results in `this.notes`. The server already strips
+     *  archived and secret content, so the only client-side filtering in
+     *  search mode is the tag chip strip (the server doesn't take tags).
+     *  `degraded: true` means the embedding model wasn't ready and ranking
+     *  fell back to FTS-only — surfaced as a muted hint under the input.
+     *
+     *  Relevance cutoff: min-max normalisation on the server spans [0, 1]
+     *  every query, even when nothing really matches, so "best of the
+     *  garbage" still gets 1.0. Pure-vec noise (notes with no FTS overlap
+     *  but coincidentally close embeddings) routinely lands at 0.6–0.7,
+     *  which is why the threshold has to be aggressive. We trim anything
+     *  below max(top*0.7, 0.5) — keeps the top hit always, kills the
+     *  long tail of "somewhat vaguely related via the embedding space"
+     *  that clutters results for short or lexical queries. */
+    async _doSearch(q) {
+        const seq = ++this._searchSeq;
+        try {
+            const res = await fb.api.search.query(q, { limit: 20, includePending: true });
+            // A faster keystroke already bumped seq — drop this stale result.
+            if (seq !== this._searchSeq) return;
+            const all = res.notes || [];
+            const kept = this._applyRelevanceCutoff(all);
+            this.searchActive = true;
+            this.searchDegraded = !!res.degraded;
+            this.notes = kept;
+            this._updateDegradedHint();
+            this.renderList();
+            // Narrow the chip strip to tags that actually appear on the
+            // kept results — otherwise it stays showing every tag in the
+            // DB, which is noisy and misleading during a tight search.
+            this._renderTagFilter();
+        } catch (err) {
+            console.error("[fb-notes-view] search failed:", err);
+        }
+    }
+
+    /** Trim the ranked results to just the ones that actually look relevant.
+     *  Two filters stacked:
+     *    1) A note where both title and content came back empty is a
+     *       secret-only shell (SecretStripper gutted it) — it still
+     *       matched FTS on the pre-strip text but is useless to display.
+     *    2) Score must clear max(topScore * 0.6, 0.3). Relative-to-top
+     *       handles the "top is 0.7, rank 2 is 0.43" semantic case; the
+     *       0.3 floor catches the pathological "top is 0.5, everything
+     *       below is pure noise at 0.4–0.49". */
+    _applyRelevanceCutoff(results) {
+        const nonEmpty = results.filter(n =>
+            (n.title && n.title.trim()) || (n.content && n.content.trim())
+        );
+        if (nonEmpty.length === 0) return [];
+        const top = nonEmpty[0].score ?? 0;
+        const cutoff = Math.max(top * 0.7, 0.5);
+        return nonEmpty.filter(n => (n.score ?? 0) >= cutoff);
+    }
+
+    _updateDegradedHint() {
+        const hint = this.querySelector("#search-degraded-hint");
+        if (!hint) return;
+        hint.hidden = !(this.searchActive && this.searchDegraded);
+    }
+
     render() {
         this.innerHTML = `
             <style>
@@ -163,6 +238,13 @@ class FbNotesView extends HTMLElement {
                 }
                 fb-notes-view .nv-search input::placeholder { color: var(--text-muted); }
                 fb-notes-view .nv-search input:focus { border-color: var(--accent); }
+                fb-notes-view .nv-search-hint {
+                    padding: 6px 12px 0;
+                    font-size: 11px;
+                    color: var(--text-muted);
+                    font-style: italic;
+                }
+                fb-notes-view .nv-search-hint[hidden] { display: none !important; }
 
                 fb-notes-view .nv-list-header {
                     display: flex;
@@ -412,6 +494,31 @@ class FbNotesView extends HTMLElement {
                     border-bottom: 1px solid var(--border);
                 }
                 fb-notes-view .nv-tag-filter[hidden] { display: none !important; }
+                /* ~3 rows of chips; the mask fade hints there's more below. */
+                fb-notes-view .nv-tag-filter.collapsed {
+                    max-height: 82px;
+                    overflow: hidden;
+                    mask-image: linear-gradient(to bottom, black 70%, transparent);
+                    -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent);
+                }
+                fb-notes-view .nv-tag-filter-toggle {
+                    align-self: flex-start;
+                    margin: -2px 12px 8px;
+                    background: transparent;
+                    border: 1px solid var(--border);
+                    border-radius: 10px;
+                    padding: 2px 10px;
+                    color: var(--text-muted);
+                    font: inherit;
+                    font-size: 11px;
+                    cursor: pointer;
+                    transition: color 0.1s, border-color 0.1s;
+                }
+                fb-notes-view .nv-tag-filter-toggle:hover {
+                    color: var(--text);
+                    border-color: var(--accent);
+                }
+                fb-notes-view .nv-tag-filter-toggle[hidden] { display: none !important; }
                 fb-notes-view .nv-editor-body {
                     flex: 1;
                     overflow: auto;
@@ -504,7 +611,11 @@ class FbNotesView extends HTMLElement {
                         <fb-icon name="search"></fb-icon>
                         <input type="search" id="search-input" placeholder="Search all notes"/>
                     </div>
+                    <div class="nv-search-hint" id="search-degraded-hint" hidden>
+                        Full-text ranking — embeddings still loading.
+                    </div>
                     <div class="nv-tag-filter" id="tag-filter" hidden></div>
+                    <button class="nv-tag-filter-toggle" id="tag-filter-toggle" type="button" hidden>+ more</button>
                     <div class="nv-list-header">
                         <span class="nv-list-title" id="list-title">All Notes</span>
                         <button class="nv-icon-btn" id="toggle-archived-btn" title="Show archived">
@@ -554,9 +665,30 @@ class FbNotesView extends HTMLElement {
             this.querySelector("#list-title").textContent = this.showArchived ? "All + Archived" : "All Notes";
             this.renderList();
         });
+        this.querySelector("#tag-filter-toggle").addEventListener("click", () => {
+            this._tagFilterExpanded = !this._tagFilterExpanded;
+            const strip = this.querySelector("#tag-filter");
+            const btn = this.querySelector("#tag-filter-toggle");
+            strip.classList.toggle("collapsed", !this._tagFilterExpanded);
+            btn.textContent = this._tagFilterExpanded ? "show less" : "+ more";
+        });
         this.querySelector("#search-input").addEventListener("input", (e) => {
-            this.searchQuery = e.target.value.trim().toLowerCase();
-            this.renderList();
+            const q = e.target.value.trim();
+            clearTimeout(this._searchDebounce);
+            if (q.length === 0) {
+                // Cancel any in-flight search and return to browse mode.
+                this._searchSeq++;
+                if (this.searchActive) {
+                    this.searchActive = false;
+                    this.searchDegraded = false;
+                    this._updateDegradedHint();
+                    this.loadNotes().then(() => this._renderTagFilter());
+                }
+                return;
+            }
+            // 250ms debounce is long enough to absorb fast typing without
+            // masking the perceived latency of the server hop.
+            this._searchDebounce = setTimeout(() => this._doSearch(q), 250);
         });
         const titleEl = this.querySelector("#title");
         titleEl.addEventListener("blur",  () => this.flushSave());
@@ -586,9 +718,14 @@ class FbNotesView extends HTMLElement {
      *  itself after each click to only show tags that still appear on at
      *  least one of the currently-visible notes (so every chip is a
      *  guaranteed-non-empty further filter). Currently-selected chips stay
-     *  visible regardless so the user can always deselect. */
+     *  visible regardless so the user can always deselect.
+     *
+     *  Chips are sorted by usage frequency (descending) so the tags the
+     *  user touches most live at the top. The strip is clamped to ~3 rows
+     *  with a "+ more" toggle when the set overflows. */
     async _renderTagFilter() {
         const strip = this.querySelector("#tag-filter");
+        const toggle = this.querySelector("#tag-filter-toggle");
         if (!strip) return;
         let allTags = [];
         try {
@@ -616,14 +753,42 @@ class FbNotesView extends HTMLElement {
         if (visible.length === 0) {
             strip.hidden = true;
             strip.innerHTML = "";
+            strip.classList.remove("collapsed");
+            if (toggle) toggle.hidden = true;
             return;
         }
+
+        // Most-used tags first; name as the stable tie-breaker.
+        visible.sort((a, b) => {
+            const diff = (b.usageCount || 0) - (a.usageCount || 0);
+            return diff !== 0 ? diff : a.name.localeCompare(b.name);
+        });
 
         strip.hidden = false;
         strip.innerHTML = visible.map(t =>
             `<fb-tag-chip name="${t.name}" color="${t.color}" clickable
                           ${selected.has(t.name) ? "selected" : ""}></fb-tag-chip>`
         ).join("");
+
+        // Decide whether the collapse toggle is needed. Measure against
+        // the un-clamped layout, then re-apply whatever state the user
+        // last asked for. rAF so custom elements have laid out first.
+        strip.classList.remove("collapsed");
+        requestAnimationFrame(() => {
+            const naturalHeight = strip.scrollHeight;
+            strip.classList.add("collapsed");
+            const clampedHeight = strip.clientHeight;
+            strip.classList.remove("collapsed");
+            const overflows = naturalHeight > clampedHeight + 1;
+
+            if (toggle) {
+                toggle.hidden = !overflows;
+                toggle.textContent = this._tagFilterExpanded ? "show less" : "+ more";
+            }
+            if (overflows && !this._tagFilterExpanded) {
+                strip.classList.add("collapsed");
+            }
+        });
 
         strip.querySelectorAll("fb-tag-chip").forEach(chip => {
             chip.addEventListener("click", async () => {
@@ -633,9 +798,16 @@ class FbNotesView extends HTMLElement {
                 } else {
                     this.tagFilter.tags = [...this.tagFilter.tags, name];
                 }
-                // Order matters: load first so this.notes is fresh, then
-                // re-render the strip from the new result set.
-                await this.loadNotes();
+                // In search mode, tag filtering is applied client-side in
+                // renderList against the existing result set — skip the
+                // browse-mode reload so we don't trash the ranked results.
+                if (this.searchActive) {
+                    this.renderList();
+                } else {
+                    // Order matters: load first so this.notes is fresh, then
+                    // re-render the strip from the new result set.
+                    await this.loadNotes();
+                }
                 this._renderTagFilter();
             });
         });
@@ -687,19 +859,26 @@ class FbNotesView extends HTMLElement {
     renderList() {
         const filtered = this.notes.filter(n => {
             if (!this.showArchived && n.archived) return false;
-            if (this.searchQuery) {
-                const haystack = ((n.title || "") + " " + (n.content || "")).toLowerCase();
-                if (!haystack.includes(this.searchQuery)) return false;
+            // Tag filter is server-side in browse mode (loadNotes passes it
+            // as a query param) but search results come back unfiltered,
+            // so apply it here whenever a search is active.
+            if (this.searchActive && this.tagFilter.tags.length > 0) {
+                const noteTags = new Set(n.tags || []);
+                if (!this.tagFilter.tags.every(t => noteTags.has(t))) return false;
             }
             return true;
         });
 
-        // Sort: pinned first, then most-recently-updated.
-        filtered.sort((a, b) => {
-            if (a.pinned && !b.pinned) return -1;
-            if (!a.pinned && b.pinned) return 1;
-            return new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0);
-        });
+        if (!this.searchActive) {
+            // Browse mode: pinned first, then most-recently-updated.
+            filtered.sort((a, b) => {
+                if (a.pinned && !b.pinned) return -1;
+                if (!a.pinned && b.pinned) return 1;
+                return new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0);
+            });
+        }
+        // Search mode: preserve the server's score order — pinned boost
+        // would hide the relevance signal that's the whole point of search.
 
         const list = this.querySelector("#note-list");
         if (filtered.length === 0) {
