@@ -64,8 +64,10 @@ public class EventRepository : IEventRepository
     {
         if (string.IsNullOrWhiteSpace(evt.Title))
             throw new ArgumentException("Event title is required", nameof(evt));
-        if (evt.EndAt is not null && evt.EndAt <= evt.StartAt)
-            throw new ArgumentException("Event end_at must be after start_at", nameof(evt));
+        // `end == start` is a zero-duration point-in-time event; only
+        // strictly inverted windows are invalid.
+        if (evt.EndAt is not null && evt.EndAt < evt.StartAt)
+            throw new ArgumentException("Event end_at cannot be before start_at", nameof(evt));
 
         if (string.IsNullOrEmpty(evt.Id))
             evt.Id = Ulid.NewUlid().ToString();
@@ -112,8 +114,10 @@ public class EventRepository : IEventRepository
     {
         if (string.IsNullOrWhiteSpace(evt.Title))
             throw new ArgumentException("Event title is required", nameof(evt));
-        if (evt.EndAt is not null && evt.EndAt <= evt.StartAt)
-            throw new ArgumentException("Event end_at must be after start_at", nameof(evt));
+        // `end == start` is a zero-duration point-in-time event; only
+        // strictly inverted windows are invalid.
+        if (evt.EndAt is not null && evt.EndAt < evt.StartAt)
+            throw new ArgumentException("Event end_at cannot be before start_at", nameof(evt));
 
         evt.UpdatedAt = DateTime.UtcNow;
 

@@ -80,6 +80,21 @@ public class EventRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task Create_AcceptsZeroDurationEvent()
+    {
+        // start == end is a valid point-in-time event (e.g. "9:00 reminder").
+        // Only strictly inverted windows are rejected.
+        var moment = new DateTime(2026, 2, 1, 9, 0, 0, DateTimeKind.Utc);
+        var id = await _repo.CreateAsync(TestUserId, new Event
+        {
+            Title = "alarm",
+            StartAt = moment,
+            EndAt = moment,
+        }, TestContext.Current.CancellationToken);
+        Assert.NotNull(id);
+    }
+
+    [Fact]
     public async Task Update_PersistsChangedFields()
     {
         var evt = new Event
